@@ -97,7 +97,7 @@ project objects only", and a tile that cannot be loaded is named in the answer.
 | `world_objects` | Static map objects and project objects whose box touches a circle or rectangle, with transform, distance and size or "box unknown" |
 | `ground_at` | Terrain height, material, water, roads and building floors at up to 1000 points; the highest surface below a height |
 | `object_ground` | How project objects or a hypothetical placement stand: "floats ‹x› m", "‹x› m in the ground", or the corner distances |
-| `check_overlap` | Which map and project objects intersect, as rotated boxes with penetration depth; objects without a known box are named |
+| `check_overlap` | Which map and project objects intersect, as rotated boxes with penetration depth; with `precise`, the collision rasters confirm each intersection (pairs without a raster are compared as boxes and say so); objects without a known box are named |
 | `class_info` | Size, clipping and collision box, radius, flags and raster of classes or models |
 
 Some rules the MCP keeps for the agent: it joins only servers that announce the `agents` capability, so nobody sees it

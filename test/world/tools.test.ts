@@ -135,6 +135,29 @@ describe('world tools through MCP', () => {
     expect(unknown.data.objects[0].overlaps).toBe('box unknown');
   });
 
+  it('check_overlap precise: the collision raster frees a crate above the low roof edge, not one inside it', async () => {
+    const above = { class: 'WoodenCrate', position: [150, 105.5, 203.5] };
+    const boxes = await call('check_overlap', { placement: above });
+    expect(boxes.data.objects[0].overlaps.map((o: any) => o.class)).toEqual(['Land_Mil_Barracks2', 'Land_Mil_Barracks2']);
+
+    const precise = await call('check_overlap', { placement: above, precise: true });
+    expect(precise.data.objects[0]).toMatchObject({ overlaps: [], clearedByRasters: 2 });
+    expect(precise.text).toBe('placement (WoodenCrate): no intersection; 2 box intersections free by the collision rasters');
+
+    const inside = await call('check_overlap', { placement: { ...above, position: [150, 104, 203.5] }, precise: true });
+    const hits = inside.data.objects[0].overlaps;
+    expect(hits.map((o: any) => o.source).sort()).toEqual(['map', 'project']);
+    for (const o of hits) expect(o.compared).toBe(`collision raster of ${o.id}`);
+
+    const both = await call('check_overlap', { ids: [ids[1]], precise: true });
+    expect(both.data.objects[0].overlaps).toEqual([expect.objectContaining({ source: 'map', compared: 'collision rasters', depth: 6.74 })]);
+
+    const line = await call('check_overlap', { placement: { class: 'WoodenCrate', position: [300, 104, 60] }, precise: true });
+    const pl = line.data.objects[0].overlaps.find((o: any) => o.class === 'Land_Test_PowerLine');
+    expect(pl).toMatchObject({ compared: 'boxes (no collision raster)' });
+    expect(line.text).toContain('compared as boxes only (no collision raster)');
+  });
+
   it('class_info: by name ignoring case, by model path, unknown', async () => {
     const r = await call('class_info', { names: ['landmilbarracks2', 'dz\\gear\\camping\\wooden_case.p3d', 'SomeMod_Wall'] });
     expect(r.text).toBe('2 of 3 found in class data 1.30-1; unknown: SomeMod_Wall');

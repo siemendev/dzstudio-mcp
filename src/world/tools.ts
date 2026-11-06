@@ -8,13 +8,14 @@ import {
   objectGround,
   orientedBox,
   overlapDepth,
+  rasterHitsBox,
   rowsFrom,
   WorldData,
   type Area,
   type BoxEntry,
   type WorldObject,
 } from './data.js';
-import { cmpRevision, TILE } from './format.js';
+import { cmpRevision, TILE, type Raster } from './format.js';
 import { DataUnavailable, NewerFormat, type Pointer, type PointerWorld, type WorldDataSource } from './source.js';
 
 export const MAX_POINTS = 1000;
@@ -403,7 +404,25 @@ export class WorldTools {
     return { text, data };
   }
 
-  async checkOverlap(handle: string | undefined, map: string | undefined, ids?: string[], placement?: Placement): Promise<ToolResult> {
+  /** The collision raster of an object, or null when it has none or it cannot be loaded (then named in `missing`). */
+  private async collisionRaster(ctx: Context, o: WorldObject, missing: string[]): Promise<Raster | null> {
+    if (!o.box?.raster || !ctx.classes) return null;
+    try {
+      const r = await ctx.classes.raster(o.box.id);
+      return r?.channels.g ? r : null;
+    } catch (err) {
+      missing.push(missingName(`raster ${o.box.id}`, err));
+      return null;
+    }
+  }
+
+  async checkOverlap(
+    handle: string | undefined,
+    map: string | undefined,
+    ids?: string[],
+    placement?: Placement,
+    precise = false,
+  ): Promise<ToolResult> {
     const ctx = await this.context(handle, map);
     const { list, notFound } = this.subjects(ctx, ids, placement);
     const project = ctx.objects.map((p) => this.projectObject(p, ctx.classes));
@@ -432,6 +451,9 @@ export class WorldTools {
       for (const o of project) if (o.id !== s.id && distanceToArea(o, area) !== null) candidates.push(o);
       const overlaps: Record<string, unknown>[] = [];
       const unknown: string[] = [];
+      let cleared = 0;
+      let boxesOnly = 0;
+      const own = precise ? await this.collisionRaster(ctx, s, missing) : null;
       for (const c of candidates) {
         const cb = c.box ? orientedBox(c.box, c) : null;
         if (!cb) {
@@ -439,15 +461,33 @@ export class WorldTools {
           continue;
         }
         const depth = overlapDepth(box, cb);
-        if (depth !== null) overlaps.push({ id: c.id, source: c.source, class: c.class, depth: r2(depth) });
+        if (depth === null) continue;
+        const hit: Record<string, unknown> = { id: c.id, source: c.source, class: c.class, depth: r2(depth) };
+        if (precise) {
+          const other = await this.collisionRaster(ctx, c, missing);
+          if (!own && !other) {
+            hit.compared = 'boxes (no collision raster)';
+            boxesOnly++;
+          } else {
+            const ok = (!own || rasterHitsBox(s, s.box, own, cb)) && (!other || rasterHitsBox(c, c.box!, other, box));
+            if (!ok) {
+              cleared++;
+              continue;
+            }
+            hit.compared = own && other ? 'collision rasters' : `collision raster of ${own ? s.id : c.id}`;
+          }
+        }
+        overlaps.push(hit);
       }
       overlaps.sort((a, b) => (b.depth as number) - (a.depth as number));
       const row: Record<string, unknown> = { id: s.id, class: s.class, overlaps };
+      if (precise && cleared) row.clearedByRasters = cleared;
       if (unknown.length) row.withoutKnownBox = { count: unknown.length, classes: [...new Set(unknown)] };
       rows.push(row);
-      lines.push(
-        `${s.id} (${s.class}): ${overlaps.length ? `intersects ${plural(overlaps.length, 'object')}` : 'no intersection with known boxes'}${unknownText(unknown)}`,
-      );
+      let line = `${s.id} (${s.class}): ${overlaps.length ? `intersects ${plural(overlaps.length, 'object')}` : precise ? 'no intersection' : 'no intersection with known boxes'}`;
+      if (cleared) line += `; ${plural(cleared, 'box intersection')} free by the collision rasters`;
+      if (boxesOnly) line += `; ${boxesOnly} of them compared as boxes only (no collision raster)`;
+      lines.push(line + unknownText(unknown));
     }
     const data: Record<string, unknown> = { objects: rows };
     if (notFound.length) data.notFound = notFound;
