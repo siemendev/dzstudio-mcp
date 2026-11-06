@@ -179,8 +179,11 @@ export class CollabSession {
   private events: SessionEvent[] = [];
   private eventWaiters: (() => void)[] = [];
   private pending = new Map<string, Pending>();
-  private nextClientSeq = 1;
-  private lockSeq = 0;
+  /** The next clientSeq for `ops/send` and the last lockSeq, kept across a restart of the MCP. */
+  nextClientSeq = 1;
+  lockSeq = 0;
+  /** Called when something changes that a return after a restart needs: the counters, or the applied state. */
+  onPersist?: (what: 'meta' | 'state') => void;
   private lastInputMs = Date.now();
   private sendChain: Promise<unknown> = Promise.resolve();
   private polling = false;
@@ -280,6 +283,66 @@ export class CollabSession {
     }
     this.state = 'active';
     this.startPolling();
+  }
+
+  /**
+   * Returns to a session after the MCP restarted, as the same participant with `resume`, from a state saved at its
+   * cursor. Returns undefined when the server does not take the participant back (it would send a snapshot, the
+   * cursor is too old, or the participant timed out); the old participation is left then, and the caller joins anew.
+   */
+  static async rejoin(
+    opts: SessionOptions,
+    saved: { sessionId: string; participantId: string; prefix: string; clientSeq: number; lockSeq: number; phase: Phase; status: string },
+    state: { seq: number; text: string } | undefined,
+  ): Promise<CollabSession | undefined> {
+    const s = new CollabSession(opts, saved.sessionId, saved.prefix);
+    s.participantId = saved.participantId;
+    s.nextClientSeq = saved.clientSeq;
+    s.lockSeq = saved.lockSeq;
+    s.phase = saved.phase;
+    s.status = saved.status;
+    const giveUp = async (): Promise<undefined> => {
+      await s.client.request('session/leave', s.ids(), opts.token(), s.timing.requestTimeoutMs).catch(() => undefined);
+      return undefined;
+    };
+    if (!state) return giveUp();
+    try {
+      s.scene.open(state.text);
+    } catch {
+      return giveUp();
+    }
+    s.appliedSeq = s.pollCursor = state.seq;
+    let res: Json;
+    try {
+      res = await s.withRetry(() =>
+        s.client.request(
+          'session/join',
+          {
+            requestId: requestId(),
+            client: opts.clientInfo,
+            sessionId: saved.sessionId,
+            instanceKey: saved.prefix,
+            resume: { participantId: saved.participantId, after: state.seq },
+          },
+          opts.token(),
+          s.timing.requestTimeoutMs,
+        ),
+      );
+    } catch (e) {
+      if (e instanceof CollabError && e.code === 'not_participant' && e.error.reason !== 'removed') return undefined;
+      if (e instanceof CollabError && e.code === 'cursor_too_old') return giveUp();
+      throw e;
+    }
+    if (res.mode !== 'resume') return giveUp();
+    s.kind = res.kind;
+    s.role = res.role;
+    s.colour = res.colour;
+    s.rights = { canInvite: !!res.canInvite, canSave: !!res.canSave, canManage: !!res.canManage };
+    s.capabilities = Array.isArray(res.capabilities) ? res.capabilities : [];
+    s.state = 'active';
+    s.startPolling();
+    void s.setLocks([]).catch(() => undefined);
+    return s;
   }
 
   private async doJoin(): Promise<void> {
@@ -412,6 +475,7 @@ export class CollabSession {
   setPhase(phase: Phase, status?: string): void {
     this.phase = phase;
     if (status !== undefined) this.status = status;
+    this.onPersist?.('meta');
   }
 
   private presenceBody(): Json {
@@ -606,6 +670,12 @@ export class CollabSession {
   }
 
   private applyOps(entries: Json[]): void {
+    const before = this.appliedSeq;
+    this.applyLog(entries);
+    if (this.appliedSeq !== before) this.onPersist?.('state');
+  }
+
+  private applyLog(entries: Json[]): void {
     let i = 0;
     while (i < entries.length) {
       const first = entries[i]!;
@@ -692,6 +762,7 @@ export class CollabSession {
       const set = [...new Set(elements)];
       const changed = set.length !== this.selection.size || set.some((e) => !this.selection.has(e));
       this.lockSeq++;
+      this.onPersist?.('meta');
       if (changed) this.lastInputMs = Date.now();
       const res = await this.sendRequest('locks/set', { ...this.ids(), lockSeq: this.lockSeq, elements: set });
       const granted = (res.granted ?? []) as string[];
@@ -727,6 +798,7 @@ export class CollabSession {
       });
     });
     this.nextClientSeq += links.length;
+    this.onPersist?.('meta');
     return items;
   }
 

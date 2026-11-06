@@ -1,4 +1,6 @@
+import { join } from 'node:path';
 import type { ConfigStore, Credential, ServerEntry } from '../config/config.js';
+import { SessionStore, type SavedSession } from '../config/sessions.js';
 import { agentClient, CollabClient, type ServerInfo } from '../protocol/client.js';
 import {
   AlreadyRunning,
@@ -22,6 +24,8 @@ import type { Element, Operation } from '../scene/textform.js';
 export const MAX_HELD = 20_000;
 export const PAGE_SIZE = 500;
 export const IDLE_LEAVE_MS = 30 * 60_000;
+/** The project state of a session is written to disk at most this often while operations arrive. */
+export const STATE_SAVE_MS = 5000;
 const GROUP_COLOURS = ['#60A5FA', '#F87171', '#34D399', '#FBBF24', '#A78BFA', '#F472B6', '#22D3EE', '#FB923C'];
 
 /** A failure the agent should read: the message is the tool result. */
@@ -55,6 +59,9 @@ interface SessionRecord {
   collab: CollabSession | undefined;
   idleLeft: boolean;
   lastWorkMs: number;
+  /** Saved before a restart of the MCP and not back in the session yet. */
+  saved?: SavedSession;
+  stateTimer?: NodeJS.Timeout;
 }
 
 interface PendingLogin {
@@ -163,12 +170,17 @@ export class Agent {
   private infos = new Map<string, { info: ServerInfo; at: number }>();
   private agentEvents: string[] = [];
   private idleTimer: NodeJS.Timeout;
+  private saved: SessionStore;
+  /** Settles once the sessions of the last run are restored (or given up); tools wait for it. */
+  readonly ready: Promise<void>;
   /** The class data, for opening a project from its files; set by the world tools. */
   classes: (() => Promise<ClassLookup | null>) | undefined;
 
   constructor(readonly opts: AgentOptions) {
     this.idleTimer = setInterval(() => void this.leaveIdle(), 60_000);
     this.idleTimer.unref();
+    this.saved = new SessionStore(join(opts.store.dir, 'sessions'));
+    this.ready = this.restoreAll();
   }
 
   private get store(): ConfigStore {
@@ -214,11 +226,146 @@ export class Agent {
 
   close(): void {
     clearInterval(this.idleTimer);
+    for (const r of this.sessions.values()) clearTimeout(r.stateTimer);
   }
 
+  /**
+   * Stops without leaving: every session is saved with its state, and the next start returns to it with `resume`.
+   * The server takes the agent out on its own if it does not come back.
+   */
   async shutdown(): Promise<void> {
     this.close();
-    for (const r of this.sessions.values()) await r.collab?.leave();
+    await this.ready.catch(() => undefined);
+    for (const r of this.sessions.values()) {
+      const c = r.collab;
+      if (!c || !c.active || r.idleLeft) continue;
+      this.persist(r);
+      this.writeState(r);
+      await c.stop();
+    }
+  }
+
+  // ------------------------------------------------------------ returning after a restart
+
+  private persist(r: SessionRecord): void {
+    const c = r.collab;
+    if (!c || !c.participantId) return;
+    this.saved.save({
+      handle: r.handle,
+      server: r.server,
+      sessionId: r.sessionId,
+      projectName: r.projectName,
+      map: r.map,
+      participantId: c.participantId,
+      prefix: c.prefix,
+      clientSeq: c.nextClientSeq,
+      lockSeq: c.lockSeq,
+      phase: c.phase,
+      status: c.status,
+      lastWorkMs: r.lastWorkMs,
+    });
+  }
+
+  private writeState(r: SessionRecord): void {
+    clearTimeout(r.stateTimer);
+    r.stateTimer = undefined;
+    const c = r.collab;
+    if (c?.active) this.saved.saveState(r.server, r.sessionId, c.appliedSeq, c.scene.stateText());
+  }
+
+  /** Keeps a session on disk from now on: counters at once, the state when it changed, at most every few seconds. */
+  private attach(r: SessionRecord): void {
+    const c = r.collab!;
+    r.saved = undefined;
+    c.onPersist = (what) => {
+      if (what === 'meta') this.persist(r);
+      else if (!r.stateTimer) {
+        r.stateTimer = setTimeout(() => this.writeState(r), STATE_SAVE_MS);
+        r.stateTimer.unref();
+      }
+    };
+    this.persist(r);
+    this.writeState(r);
+  }
+
+  /** The agent is out of a session for good. */
+  private drop(r: SessionRecord): void {
+    clearTimeout(r.stateTimer);
+    this.saved.remove(r.server, r.sessionId);
+    this.sessions.delete(r.handle);
+    if (this.current === r.handle) this.current = undefined;
+  }
+
+  private async restoreAll(): Promise<void> {
+    const limit = this.opts.idleLeaveMs ?? IDLE_LEAVE_MS;
+    for (const s of this.saved.list().sort((a, b) => a.handle.localeCompare(b.handle, 'en', { numeric: true }))) {
+      const handle = this.sessions.has(s.handle) || !/^s[0-9]+$/.test(s.handle) ? `s${this.nextHandle}` : s.handle;
+      this.nextHandle = Math.max(this.nextHandle, Number(handle.slice(1)) + 1);
+      const r: SessionRecord = {
+        handle,
+        server: s.server,
+        sessionId: s.sessionId,
+        projectName: s.projectName,
+        map: s.map,
+        collab: undefined,
+        idleLeft: false,
+        lastWorkMs: s.lastWorkMs,
+        saved: s,
+      };
+      this.sessions.set(handle, r);
+      if (s.phase === 'waiting' && Date.now() - s.lastWorkMs >= limit) {
+        // it would have left by now
+        await this.leaveSaved(r, s);
+        this.drop(r);
+        continue;
+      }
+      this.current ??= handle;
+      await this.restore(r).catch(() => undefined);
+    }
+  }
+
+  private async leaveSaved(r: SessionRecord, s: SavedSession): Promise<void> {
+    try {
+      const server = this.store.server(r.server);
+      const token = this.store.credential(server.name)?.token;
+      if (token) await this.client(server).request('session/leave', { sessionId: s.sessionId, participantId: s.participantId }, token);
+    } catch {
+      // the server takes it out on its own
+    }
+  }
+
+  /** Back into a saved session: with `resume` from the saved state, otherwise joined anew. */
+  private async restore(r: SessionRecord): Promise<void> {
+    const s = r.saved!;
+    let server: ServerEntry;
+    let cred: Credential;
+    try {
+      server = this.store.server(r.server);
+      cred = this.credential(server);
+    } catch (e) {
+      this.drop(r);
+      throw e;
+    }
+    try {
+      const back = await CollabSession.rejoin(this.sessionOptions(server, r, cred), s, this.saved.state(r.server, r.sessionId));
+      if (back) {
+        r.collab = back;
+        this.agentEvents.push(`[${r.handle}] Back in ${r.projectName || r.sessionId} after a restart`);
+      } else {
+        r.collab = await this.connect(server, r, cred);
+        r.collab.setPhase(s.phase, s.status);
+        this.agentEvents.push(
+          `[${r.handle}] Joined ${r.projectName || r.sessionId} again after a restart (the server could not continue the old place)`,
+        );
+      }
+      this.attach(r);
+    } catch (e) {
+      if (e instanceof UnreachableError || (e instanceof ToolError && e.message === 'Server not reachable')) throw e;
+      this.drop(r);
+      const why = e instanceof CollabError && e.code === 'not_participant' ? 'the agent was removed' : (e as Error).message;
+      this.agentEvents.push(`[${r.handle}] Could not return to ${r.projectName || r.sessionId} after a restart: ${why}`);
+      throw e;
+    }
   }
 
   // ------------------------------------------------------------ events
@@ -239,10 +386,7 @@ export class Agent {
 
   private onEvent(r: SessionRecord, c: CollabSession, e: SessionEvent): void {
     if (e.kind === 'saved' && c.phase === 'review' && Number(e.data?.savedSeq) >= c.lastOwnSeq) c.setPhase('waiting', '');
-    if (e.kind === 'ended' || e.kind === 'removed') {
-      this.sessions.delete(r.handle);
-      if (this.current === r.handle) this.current = undefined;
-    }
+    if (e.kind === 'ended' || e.kind === 'removed') this.drop(r);
   }
 
   async waitEvents(handle: string | undefined, ms: number): Promise<string[]> {
@@ -457,6 +601,7 @@ export class Agent {
     rec.sessionId = rec.collab.sessionId;
     this.sessions.set(rec.handle, rec);
     this.current = rec.handle;
+    this.attach(rec);
     const notes = loaded!.notes;
     return {
       text:
@@ -508,6 +653,7 @@ export class Agent {
     rec.collab = await this.connect(server, rec, cred);
     this.sessions.set(handle, rec);
     this.current = handle;
+    this.attach(rec);
     return { text: `Joined ${rec.projectName || target} as ${handle}; it is the current session`, data: this.sessionRow(rec) };
   }
 
@@ -573,20 +719,28 @@ export class Agent {
   /** The session for a tool that works in it; rejoins one the agent left while idle. */
   private async live(handle: string | undefined, work = true): Promise<{ r: SessionRecord; c: CollabSession }> {
     const r = this.record(handle);
+    if (r.saved) {
+      await this.restore(r).catch((e: Error) => {
+        throw e instanceof ToolError ? e : new ToolError(`Not back in the session after a restart: ${e.message}`);
+      });
+    }
     if (r.idleLeft) {
       const server = this.resolveServer(r.server);
       r.collab = await this.connect(server, r, this.credential(server));
       r.idleLeft = false;
+      this.attach(r);
       this.agentEvents.push(`[${r.handle}] Joined again after leaving while idle`);
     }
     const c = r.collab;
     if (!c || !c.active) {
       const text = c?.stateText || 'Not in a session';
-      this.sessions.delete(r.handle);
-      if (this.current === r.handle) this.current = undefined;
+      this.drop(r);
       throw new ToolError(text);
     }
-    if (work) r.lastWorkMs = Date.now();
+    if (work) {
+      r.lastWorkMs = Date.now();
+      this.persist(r);
+    }
     return { r, c };
   }
 
@@ -598,6 +752,8 @@ export class Agent {
       if (Date.now() - r.lastWorkMs < limit) continue;
       await c.leave();
       r.idleLeft = true;
+      clearTimeout(r.stateTimer);
+      this.saved.remove(r.server, r.sessionId);
       this.agentEvents.push(`[${r.handle}] Left after ${Math.round(limit / 60_000)} minutes without work; joins again on the next task`);
     }
   }
@@ -619,7 +775,7 @@ export class Agent {
       phase: c ? PHASE_TEXT[c.phase] : undefined,
       status: c?.status,
       current: this.current === r.handle,
-      state: r.idleLeft ? 'left while idle' : c?.state,
+      state: r.idleLeft ? 'left while idle' : r.saved ? 'not back yet after a restart' : c?.state,
     };
   }
 
@@ -643,8 +799,7 @@ export class Agent {
         throw new ToolError(`${plural(open, 'change')} did not reach the server — call leave_session with confirm to leave anyway`);
       await c.leave();
     }
-    this.sessions.delete(r.handle);
-    if (this.current === r.handle) this.current = undefined;
+    this.drop(r);
     return { text: `Left ${r.handle}` };
   }
 
