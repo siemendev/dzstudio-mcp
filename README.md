@@ -113,6 +113,12 @@ as a human; it changes an existing object only while holding its lock; it never 
 ends a session; it does not edit loot (loot entries pass through unchanged); after 30 minutes without work it leaves
 a session and joins again on the next task.
 
+**Restarts.** The MCP keeps every session it is in, with its place in the session log and the project state there, in
+`sessions/` of the config directory. When it stops it does not leave; when it starts again it returns to each session
+as the same participant and continues from that place, with what others did in the meantime. If the server cannot take
+it back that way (it was away too long, or the server no longer has the log from there), it joins anew. A session it
+would have left while idle meanwhile, or one that ended, is forgotten.
+
 **Opening a project nobody has open.** When no session is running for a project on the server, `open_project` loads
 its files and builds the project state exactly as dzStudio does when it opens them — the same groups, objects, ids form,
 companion data and order, byte for byte — then starts the session with it, as the only participant. This needs the right

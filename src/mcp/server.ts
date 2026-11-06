@@ -40,6 +40,7 @@ export function createServer(agent: Agent, world?: WorldTools): McpServer {
     <A>(fn: (args: A) => Promise<ToolResult> | ToolResult) =>
     async (args: A): Promise<CallToolResult> => {
       try {
+        await agent.ready;
         const result = await fn(args);
         return format(result, agent.collectEvents());
       } catch (e) {

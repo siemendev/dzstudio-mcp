@@ -63,6 +63,8 @@ export class FakeServer implements Transport {
   codeLogins = new Map<string, { state: string; name?: string }>();
   invalidTokens = new Set<string>();
   projects: Json[] = [];
+  /** `session/join` with `resume` answers `mode: "snapshot"` (the server no longer has the log from the cursor). */
+  resumeAsSnapshot = false;
   private faults: { endpoint: string; mode: Fault }[] = [];
   private nextId = 1;
   private retry = new Map<string, Json>();
@@ -377,6 +379,23 @@ export class FakeServer implements Transport {
       const p = s.participants.find((x) => x.participantId === req.resume.participantId);
       if (!p || !p.active)
         return this.err('not_participant', p?.removedBy ? { reason: 'removed', by: p.removedBy } : { reason: 'timeout' });
+      if (this.resumeAsSnapshot) {
+        const snapSeq = Math.max(...s.snapshots.keys());
+        return {
+          ok: true,
+          participantId: p.participantId,
+          colour: p.colour,
+          kind: s.kind,
+          role: p.role,
+          canInvite: false,
+          canSave: false,
+          canManage: false,
+          mode: 'snapshot',
+          snapshot: { seq: snapSeq, parts: s.snapshots.get(snapSeq)!.length, bytes: 0 },
+          seq: s.log.length,
+          capabilities: [],
+        };
+      }
       return {
         ok: true,
         participantId: p.participantId,
