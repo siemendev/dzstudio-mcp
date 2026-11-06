@@ -427,11 +427,13 @@ export function createServer(agent: Agent, world?: WorldTools): McpServer {
     {
       description:
         'Which static map objects and project objects intersect project objects (ids) or a hypothetical placement, compared as rotated boxes ' +
-        '(collision box, otherwise clipping box) with the penetration depth in m; objects without a known box are named, never treated as free.',
-      inputSchema: { session, map, ids: z.array(z.string()).optional(), placement },
+        '(collision box, otherwise clipping box) with the penetration depth in m; objects without a known box are named, never treated as free. ' +
+        'With precise, a box intersection counts only if the collision rasters (shape seen from above) confirm it, which handles L-shaped ' +
+        'buildings, roofs and gaps; each pair says whether it was compared by rasters or, without one, as boxes only.',
+      inputSchema: { session, map, ids: z.array(z.string()).optional(), placement, precise: z.boolean().optional() },
     },
-    run((a: { session?: string; map?: string; ids?: string[]; placement?: Placement }) =>
-      w.checkOverlap(a.session, a.map, a.ids, a.placement),
+    run((a: { session?: string; map?: string; ids?: string[]; placement?: Placement; precise?: boolean }) =>
+      w.checkOverlap(a.session, a.map, a.ids, a.placement, a.precise ?? false),
     ),
   );
 

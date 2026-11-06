@@ -615,6 +615,51 @@ export function overlapDepth(A: OrientedBox, B: OrientedBox): number | null {
   return depth;
 }
 
+/** Whether the segment from p to q passes through the box (slab test in the box's frame). */
+export function segmentInBox(p: number[], q: number[], box: OrientedBox): boolean {
+  let t0 = 0;
+  let t1 = 1;
+  for (let k = 0; k < 3; k++) {
+    const ax = box.axes[k]!;
+    const a = (p[0]! - box.center[0]) * ax[0]! + (p[1]! - box.center[1]) * ax[1]! + (p[2]! - box.center[2]) * ax[2]!;
+    const d = (q[0]! - p[0]!) * ax[0]! + (q[1]! - p[1]!) * ax[1]! + (q[2]! - p[2]!) * ax[2]!;
+    const h = box.half[k]!;
+    if (Math.abs(d) < 1e-12) {
+      if (a < -h || a > h) return false;
+      continue;
+    }
+    let lo = (-h - a) / d;
+    let hi = (h - a) / d;
+    if (lo > hi) [lo, hi] = [hi, lo];
+    t0 = Math.max(t0, lo);
+    t1 = Math.min(t1, hi);
+    if (t0 > t1) return false;
+  }
+  return true;
+}
+
+/**
+ * Whether a cell of an object's collision raster (`g`), taken as a vertical column in model space from the bottom of
+ * its box up to the hit height, lies inside another box.
+ */
+export function rasterHitsBox(o: Placed, entry: ShapeEntry, raster: Raster, other: OrientedBox): boolean {
+  const g = raster.channels.g;
+  const b = entry.collision || entry.clip;
+  if (!g || !b) return false;
+  const bottom = b[1]!;
+  for (let j = 0; j < raster.nz; j++) {
+    const lz = (raster.z0Mm + j * raster.stepMm) / 1000;
+    for (let i = 0; i < raster.nx; i++) {
+      const v = g[j * raster.nx + i]!;
+      if (v === NO_HIT) continue;
+      const lx = (raster.x0Mm + i * raster.stepMm) / 1000;
+      const top = v / 100;
+      if (segmentInBox(toWorld(o, lx, Math.min(bottom, top), lz), toWorld(o, lx, top, lz), other)) return true;
+    }
+  }
+  return false;
+}
+
 export interface CornerGround {
   corner: [number, number, number];
   surface: number;
