@@ -136,6 +136,10 @@ to `world_data_read.js`; `DZSTUDIO_MCP_WORLD_DATA_WORLD` picks the world (defaul
 | `src/world` | Class and map data: file formats, loading and cache, and the geometry behind the world tools |
 | `src/mcp` | The tools and the MCP wiring |
 
+## Contributing
+
+Issues and pull requests are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## License
 
 AGPL-3.0, see [LICENSE](LICENSE).

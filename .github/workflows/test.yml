@@ -1,0 +1,28 @@
+name: test
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: siemendev/dzstudio-collab-server
+          path: collab-server
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: collab-server/go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run format:check
+      - run: npm test
+        env:
+          DZCOLLAB_SOURCE: ${{ github.workspace }}/collab-server
