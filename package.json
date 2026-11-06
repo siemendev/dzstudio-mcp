@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "description": "MCP server that lets an AI agent join dzStudio collaboration sessions (dzcollab 1) as a headless participant",
   "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/siemendev/dzstudio-mcp.git"
+  },
+  "homepage": "https://dzbot.de/creators/studio",
   "type": "module",
   "bin": {
     "dzstudio-mcp": "dist/index.js"
