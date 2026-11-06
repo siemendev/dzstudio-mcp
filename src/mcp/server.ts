@@ -154,6 +154,7 @@ export function createServer(agent: Agent, world?: WorldTools): McpServer {
     },
     async (a: { session?: string; wait_seconds?: number }): Promise<CallToolResult> => {
       try {
+        await agent.ready;
         const events = await agent.waitEvents(a.session, Math.round((a.wait_seconds ?? 0) * 1000));
         return format({ text: events.length ? `${events.length} event${events.length === 1 ? '' : 's'}` : 'No new events' }, events);
       } catch (e) {
