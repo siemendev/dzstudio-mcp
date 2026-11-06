@@ -27,9 +27,10 @@ afterEach(async () => {
   for (const f of cleanup.splice(0)) await f();
 });
 
-async function harness(opts: { signedIn?: boolean; idleLeaveMs?: number } = {}): Promise<Harness> {
+async function harness(opts: { signedIn?: boolean; idleLeaveMs?: number; agentName?: string } = {}): Promise<Harness> {
   const fake = new FakeServer();
-  const store = new ConfigStore(mkdtempSync(join(tmpdir(), 'dzstudio-mcp-tools-')), {});
+  const env = opts.agentName ? { DZSTUDIO_MCP_AGENT_NAME: opts.agentName } : {};
+  const store = new ConfigStore(mkdtempSync(join(tmpdir(), 'dzstudio-mcp-tools-')), env);
   store.addServer('fake', 'http://fake.invalid/dzcollab/');
   if (opts.signedIn !== false) store.setCredential('fake', { token: 't-agent-Patrick', name: 'Patrick' });
   const agent = new Agent({
@@ -141,6 +142,13 @@ describe('tools', () => {
     await joined(h);
     await h.call('read_scene');
     for (const t of h.texts) expect(t).not.toContain('t-agent-');
+  });
+
+  it('names the configured agent in the code login, so the confirmation page can show it', async () => {
+    const h = await harness({ signedIn: false, agentName: 'Scout' });
+    await h.call('login');
+    const start = h.fake.requests.find((r) => r.endpoint === 'auth/code/start');
+    expect(start?.body.client).toEqual({ name: 'dzstudio-mcp', version: '0.1.0', kind: 'agent', agentName: 'Scout' });
   });
 
   it('reports a denied login', async () => {

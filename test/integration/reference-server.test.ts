@@ -64,6 +64,7 @@ describe.skipIf(!referenceServerAvailable)('against the reference server', () =>
     });
 
     const start = await client.codeStart(agentClient('Scout'));
+    expect(await (await fetch(start.url)).text()).toContain('“Scout”');
     const form = new URLSearchParams({ code: start.loginCode, user: 'patrick', password: 'patrick-password', action: 'confirm' });
     const page = await fetch(start.url, { method: 'POST', body: form, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
     expect(page.status).toBe(200);
