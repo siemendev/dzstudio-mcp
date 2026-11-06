@@ -72,7 +72,7 @@ async function joined(h: Harness, kind: 'local' | 'hosted' = 'local') {
   const host = h.fake.createSession({
     kind,
     state: golden.Z1!,
-    hostedRef: kind === 'hosted' ? { provider: 'fake', key: 'basis' } : undefined,
+    hostedRef: kind === 'hosted' ? { provider: 'fake', key: 'base' } : undefined,
   });
   const r = await h.call('join_session', { session_id: host.sessionId });
   expect(r.isError).toBe(false);
@@ -180,7 +180,7 @@ describe('tools', () => {
     expect(scene.data.groups).toEqual([
       {
         id: GROUP,
-        name: 'Objekte',
+        name: 'Objects',
         color: '#60A5FA',
         objects: 1,
         hidden: false,
@@ -215,7 +215,7 @@ describe('tools', () => {
       groups: [{ ref: 'camp', name: 'Military camp' }],
       objects: [
         { class: 'Land_Mil_Tent_Big1_1', group: 'camp', position: [6512, 210.4, 9300], orientation: [370, 0, 0] },
-        { class: 'Barrel_Blue', group: 'Objekte', position: [6515.25, 210, 9301] },
+        { class: 'Barrel_Blue', group: 'Objects', position: [6515.25, 210, 9301] },
       ],
     });
     expect(r.isError).toBe(false);
@@ -399,17 +399,17 @@ describe('tools', () => {
 
   it('opens a project by name through its running session', async () => {
     const h = await harness();
-    const host = h.fake.createSession({ kind: 'hosted', state: golden.Z1!, hostedRef: { provider: 'fake', key: 'basis' } });
+    const host = h.fake.createSession({ kind: 'hosted', state: golden.Z1!, hostedRef: { provider: 'fake', key: 'base' } });
     h.fake.projects = [
       {
-        hostedRef: { provider: 'fake', key: 'basis' },
-        projectName: 'Basis Nord',
+        hostedRef: { provider: 'fake', key: 'base' },
+        projectName: 'North Base',
         map: 'chernarus',
         canSave: true,
         sessionId: host.sessionId,
       },
     ];
-    const r = await h.call('open_project', { project: 'basis nord' });
+    const r = await h.call('open_project', { project: 'north base' });
     expect(r.isError).toBe(false);
     h.fake.projects = [{ hostedRef: { provider: 'fake', key: 'other' }, projectName: 'Other', map: 'livonia', canSave: false }];
     expect((await h.call('open_project', { project: 'Other' })).text).toBe(

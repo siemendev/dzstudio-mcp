@@ -45,7 +45,7 @@ describe.skipIf(!referenceServerAvailable)('against the reference server', () =>
       token: anna.token,
       requestId: requestId(),
       client: { name: 'dzstudio', version: '0.4.0' },
-      projectName: 'Basis',
+      projectName: 'Base',
       map: 'chernarus',
       kind: 'local',
       instanceKey: annaKey,

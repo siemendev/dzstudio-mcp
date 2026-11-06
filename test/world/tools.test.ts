@@ -66,7 +66,7 @@ describe('world tools through MCP', () => {
     const r = await call('world_info', { near: { x: 150, z: 200, radius: 100 } });
     expect(r.text).toBe('testmap is testworld, map data 1.30-1 (game 1.30.164078, exported 2026-11-06), class data 1.30-1');
     expect(r.data).toMatchObject({ world: 'testworld', revision: '1.30-1', size: 512, tiles: { cols: 2, rows: 2 } });
-    expect(r.data.places).toEqual([{ id: 'Village_Testdorf', type: 'Village', name: 'Testdorf', x: 150, z: 200, distance: 0 }]);
+    expect(r.data.places).toEqual([{ id: 'Village_Testville', type: 'Village', name: 'Testville', x: 150, z: 200, distance: 0 }]);
     expect((await call('world_info', { place: 'berg' })).data.places.map((p: any) => p.name)).toEqual(['Testberg']);
   });
 
