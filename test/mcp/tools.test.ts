@@ -87,7 +87,7 @@ const until = async (cond: () => boolean, ms = 3000): Promise<void> => {
 };
 
 describe('tools', () => {
-  it('lists every tool of the minimum set and the world stubs', async () => {
+  it('lists every tool of the minimum set and the world tools', async () => {
     const h = await harness();
     const client = new Client({ name: 't', version: '1' });
     const [a, b] = InMemoryTransport.createLinkedPair();
@@ -402,14 +402,6 @@ describe('tools', () => {
       expect.objectContaining({ name: "Patrick's agent", kind: 'agent', you: true, phase: 'waiting for work' }),
     ]);
     expect(info.data.rights).toEqual({ canSave: false, canManage: false, canInvite: false });
-  });
-
-  it('world tools say they are not available yet', async () => {
-    const h = await harness();
-    expect(await h.call('ground_at', {})).toMatchObject({
-      isError: true,
-      text: 'ground_at is not available yet: map and class data are not published yet.',
-    });
   });
 
   it('leaves a session', async () => {

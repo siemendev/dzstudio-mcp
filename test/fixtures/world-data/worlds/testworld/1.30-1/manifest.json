@@ -1,0 +1,64 @@
+{
+  "format": 1,
+  "world": "testworld",
+  "map": "testmap",
+  "revision": "1.30-1",
+  "game": "1.30.164078",
+  "exported": "2026-11-06",
+  "classes": "1.30-1",
+  "size": 512,
+  "grid": { "step": 1, "cols": 512, "rows": 512 },
+  "tile": { "size": 256, "points": 257, "cols": 2, "rows": 2 },
+  "sea": { "min": 0.5, "max": 1 },
+  "materials": [
+    { "name": "cp_grass", "water": "none" },
+    { "name": "cp_concrete", "water": "none" },
+    { "name": "sea_water", "water": "sea" },
+    { "name": "pond_water", "water": "pond" }
+  ],
+  "roadwayShapes": ["dz\\structures\\roads\\parts\\asf1_25.p3d"],
+  "objects": [
+    ["", "dz\\plants\\tree\\t_testtree.p3d", 2],
+    ["Land_Mil_Barracks2", "dz\\structures\\military\\houses\\mil_barracks2.p3d", 273],
+    ["Land_Test_PowerLine", "dz\\test\\powerline.p3d", 1],
+    ["SomeMod_Wall", "", 0]
+  ],
+  "excluded": { "flags": [32, 64, 128], "count": 1 },
+  "counts": { "objects": 5, "roadway": 1005 },
+  "places": [
+    { "id": "Village_Testdorf", "type": "Village", "text": "Testdorf", "x": 150, "z": 200 },
+    { "id": "Hill_Testberg", "type": "Hill", "text": "Testberg", "x": 420, "z": 400 }
+  ],
+  "tiles": [
+    {
+      "x": 0,
+      "z": 0,
+      "bytes": 397,
+      "sha256": "e964ac730d15402f88ec791d224133b41b96e1987a988d7b85a1571a067f3669",
+      "objects": 3,
+      "reach": 54
+    },
+    {
+      "x": 1,
+      "z": 0,
+      "bytes": 749,
+      "sha256": "73e1a76c71fa7449e930d81dd701ee5d5cfcc17429001f7160a6094db82a0692",
+      "objects": 1,
+      "reach": 0
+    },
+    {
+      "x": 0,
+      "z": 1,
+      "bytes": 550,
+      "sha256": "2bf287098fd86c0e592ab789b7c95c358128551f674d10f0a2960e8592f44967",
+      "objects": 0,
+      "reach": 0
+    },
+    { "x": 1, "z": 1, "bytes": 717, "sha256": "da2fa00306141f42d485fdb8c03af6bc79dcd2f2d14c0234ebeb74ec41bcc05a", "objects": 1, "reach": 0 }
+  ],
+  "license": {
+    "name": "CC BY 4.0",
+    "url": "https://creativecommons.org/licenses/by/4.0/",
+    "attribution": "World data by dzbot (https://dzbot.de), measured in the running game DayZ"
+  }
+}

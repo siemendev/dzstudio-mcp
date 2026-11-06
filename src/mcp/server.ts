@@ -2,20 +2,27 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { CLIENT_VERSION } from '../protocol/client.js';
+import { CollabError } from '../protocol/transport.js';
+import { WorldDataSource } from '../world/source.js';
+import { MAX_POINTS, WorldTools, type Placement } from '../world/tools.js';
 import { Agent, ToolError, type ToolResult } from './agent.js';
 
 const session = z.string().optional().describe('Session handle (s1, s2 …) or session id; default: the current session');
 const server = z.string().optional().describe('Server name; default: the first configured server');
 const vec3 = z.tuple([z.number(), z.number(), z.number()]);
-
-const WORLD_TOOLS: [string, string][] = [
-  ['world_info', 'Map size, data version and which data tiles exist for the current map'],
-  ['world_objects', 'Static map objects (buildings, trees, rocks) in an area, with transform and box'],
-  ['ground_at', 'Ground height, surface and roadway at points'],
-  ['object_ground', 'Where an object of a class would stand on the ground at a position'],
-  ['check_overlap', 'Whether boxes overlap map objects or project objects'],
-  ['class_info', 'Dimensions and box of object classes'],
-];
+const map = z
+  .string()
+  .optional()
+  .describe('Map key (chernarus, livonia, sakhal, badlands …) or world name; default: the map of the session');
+const placement = z
+  .object({
+    class: z.string(),
+    position: vec3,
+    orientation: vec3.optional().describe('[yaw, pitch, roll] in degrees'),
+    scale: z.number().positive().optional(),
+  })
+  .optional()
+  .describe('A hypothetical object: class, position [x, y, z], orientation, scale');
 
 /** Formats a result for the model: a summary line, the data as JSON, and the events since the last result. */
 export function format(result: ToolResult, events: string[]): CallToolResult {
@@ -25,7 +32,8 @@ export function format(result: ToolResult, events: string[]): CallToolResult {
   return { content: [{ type: 'text', text }] };
 }
 
-export function createServer(agent: Agent): McpServer {
+export function createServer(agent: Agent, world?: WorldTools): McpServer {
+  const w = world ?? new WorldTools(agent, new WorldDataSource(agent.opts.store.worldData()));
   const mcp = new McpServer({ name: 'dzstudio-mcp', version: CLIENT_VERSION });
 
   const run =
@@ -35,7 +43,12 @@ export function createServer(agent: Agent): McpServer {
         const result = await fn(args);
         return format(result, agent.collectEvents());
       } catch (e) {
-        const message = e instanceof ToolError ? e.message : `Error: ${(e as Error).message}`;
+        const message =
+          e instanceof ToolError
+            ? e.message
+            : e instanceof CollabError && e.code === 'not_allowed'
+              ? `Not allowed: ${e.error.message ?? 'the server does not let an agent do this'}`
+              : `Error: ${(e as Error).message}`;
         const out = format({ text: message }, agent.collectEvents());
         return { ...out, isError: true };
       }
@@ -313,16 +326,125 @@ export function createServer(agent: Agent): McpServer {
     run((a: { session?: string; status?: string }) => agent.requestReview(a.session, a.status)),
   );
 
-  for (const [name, description] of WORLD_TOOLS) {
-    mcp.registerTool(
-      name,
-      { description: `${description}. Not available yet.`, inputSchema: { session } },
-      async (): Promise<CallToolResult> => ({
-        content: [{ type: 'text', text: `${name} is not available yet: map and class data are not published yet.` }],
-        isError: true,
-      }),
-    );
-  }
+  mcp.registerTool(
+    'world_info',
+    {
+      description:
+        'Which map data exist for the session’s map: world, data revision, game version, export date, class data revision, size, sea level; ' +
+        'place names near a point (near: X, Z, radius, default 2000 m) or matching a text (place).',
+      inputSchema: {
+        session,
+        map,
+        near: z.object({ x: z.number(), z: z.number(), radius: z.number().positive().optional() }).optional(),
+        place: z.string().optional(),
+      },
+    },
+    run((a: { session?: string; map?: string; near?: { x: number; z: number; radius?: number }; place?: string }) =>
+      w.worldInfo(a.session, a.map, a.near, a.place),
+    ),
+  );
+
+  mcp.registerTool(
+    'world_objects',
+    {
+      description:
+        'Static map objects (buildings, trees, rocks, walls) and project objects in a circle (X, Z, radius in m) or rectangle, optionally by class or flags ' +
+        '(1 building, 2 tree, 4 bush, 8 rock, 256 house): id, source (map or project), class, model, position, orientation [yaw, pitch, roll], scale, distance, size [X, Y, Z] or "box unknown". ' +
+        'An object counts if its box touches the area. Pages of 500.',
+      inputSchema: {
+        session,
+        map,
+        near: z.object({ x: z.number(), z: z.number(), radius: z.number().min(0) }).optional(),
+        rect: z.object({ minX: z.number(), minZ: z.number(), maxX: z.number(), maxZ: z.number() }).optional(),
+        class: z.string().optional(),
+        flags: z.number().int().positive().optional(),
+        source: z.enum(['all', 'map', 'project']).optional(),
+        page: z.number().int().min(0).optional(),
+      },
+    },
+    run(
+      (a: {
+        session?: string;
+        map?: string;
+        near?: { x: number; z: number; radius: number };
+        rect?: { minX: number; minZ: number; maxX: number; maxZ: number };
+        class?: string;
+        flags?: number;
+        source?: 'all' | 'map' | 'project';
+        page?: number;
+      }) => {
+        const q: Parameters<WorldTools['worldObjects']>[2] = {};
+        if (a.near) q.near = a.near;
+        if (a.rect) q.rect = a.rect;
+        if (a.class) q.class = a.class;
+        if (a.flags) q.flags = a.flags;
+        if (a.source) q.source = a.source;
+        if (a.page !== undefined) q.page = a.page;
+        return w.worldObjects(a.session, a.map, q);
+      },
+    ),
+  );
+
+  mcp.registerTool(
+    'ground_at',
+    {
+      description:
+        `Ground at up to ${MAX_POINTS} points (X, Z): terrain height (bilinear), material and water of the nearest grid point, sea level in the sea, ` +
+        'walkable surface (road, bridge, floor) with height and model, walkable surfaces of buildings there; with y also the highest surface below y.',
+      inputSchema: {
+        session,
+        map,
+        points: z
+          .array(z.object({ x: z.number(), z: z.number(), y: z.number().optional() }))
+          .min(1)
+          .max(MAX_POINTS),
+      },
+    },
+    run((a: { session?: string; map?: string; points: { x: number; z: number; y?: number }[] }) =>
+      w.groundAt(
+        a.session,
+        a.map,
+        a.points.map((p) => (p.y === undefined ? { x: p.x, z: p.z } : p)),
+      ),
+    ),
+  );
+
+  mcp.registerTool(
+    'object_ground',
+    {
+      description:
+        'How project objects (ids) or a hypothetical placement stand on the ground: the four lower corners of the box with the surface below and the distance; ' +
+        '"floats <x> m", "<x> m in the ground", or the smallest and largest distance.',
+      inputSchema: { session, map, ids: z.array(z.string()).optional(), placement },
+    },
+    run((a: { session?: string; map?: string; ids?: string[]; placement?: Placement }) =>
+      w.objectGround(a.session, a.map, a.ids, a.placement),
+    ),
+  );
+
+  mcp.registerTool(
+    'check_overlap',
+    {
+      description:
+        'Which static map objects and project objects intersect project objects (ids) or a hypothetical placement, compared as rotated boxes ' +
+        '(collision box, otherwise clipping box) with the penetration depth in m; objects without a known box are named, never treated as free.',
+      inputSchema: { session, map, ids: z.array(z.string()).optional(), placement },
+    },
+    run((a: { session?: string; map?: string; ids?: string[]; placement?: Placement }) =>
+      w.checkOverlap(a.session, a.map, a.ids, a.placement),
+    ),
+  );
+
+  mcp.registerTool(
+    'class_info',
+    {
+      description:
+        'Dimensions of classes or models: size [X, Y, Z] in m, clipping and collision box, radius, flags, whether a shape raster exists. ' +
+        'By class name (case does not matter) or model path / model id; unknown classes say so.',
+      inputSchema: { names: z.array(z.string()).min(1).max(500) },
+    },
+    run((a: { names: string[] }) => w.classInfo(a.names)),
+  );
 
   return mcp;
 }

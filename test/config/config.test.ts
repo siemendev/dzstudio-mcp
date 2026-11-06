@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -53,6 +53,24 @@ describe('config', () => {
     expect(s.credential('dzbot')).toBeUndefined();
     s.setCredential('dzbot', undefined);
     expect(new ConfigStore(dir, {}).credential('dzbot')).toBeUndefined();
+  });
+
+  it('takes world data settings from config.json, overridden by the environment', () => {
+    const dir = tmp();
+    writeFileSync(
+      join(dir, 'config.json'),
+      JSON.stringify({ worldData: { base: 'https://mirror.example.org/wd/', pointer: 'https://mirror.example.org/p' } }),
+    );
+    expect(new ConfigStore(dir, {}).worldData()).toEqual({
+      base: 'https://mirror.example.org/wd/',
+      pointer: 'https://mirror.example.org/p',
+      cacheDir: join(dir, 'cache'),
+    });
+    expect(new ConfigStore(dir, { DZSTUDIO_MCP_WORLD_DATA: '/srv/world-data' }).worldData()).toEqual({
+      base: 'file:///srv/world-data',
+      cacheDir: join(dir, 'cache'),
+    });
+    expect(new ConfigStore(tmp(), {}).worldData().base).toBeUndefined();
   });
 
   it('finds the config directory', () => {

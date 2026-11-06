@@ -93,6 +93,22 @@ export interface ObjectQuery {
   page?: number;
 }
 
+export interface ProjectObject {
+  id: string;
+  class: string;
+  position: Vec3;
+  orientation: Vec3;
+  scale: number;
+}
+
+export interface SessionWorld {
+  /** Stable key of the session: server and session id. */
+  key: string;
+  handle: string;
+  map: string;
+  objects: ProjectObject[];
+}
+
 const PHASE_TEXT: Record<Phase, string> = { waiting: 'waiting for work', working: 'working', review: 'waiting for review' };
 
 function plural(n: number, word: string): string {
@@ -713,6 +729,31 @@ export class Agent {
     if (byName.length === 1) return byName[0]!.id;
     if (byName.length > 1) throw new ToolError(`Several groups are called ${ref} — use the group id`);
     throw new ToolError(`No group ${ref}`);
+  }
+
+  /** Map key and objects of a session for the world tools; undefined when no session is named and none is current. */
+  async sessionWorld(handle: string | undefined): Promise<SessionWorld | undefined> {
+    if (handle === undefined && !this.current) return undefined;
+    const { r, c } = await this.live(handle, false);
+    const objects = c.view((scene) => {
+      const out: ProjectObject[] = [];
+      for (const el of scene.walk()) {
+        if (el.kind !== 'core:object') continue;
+        const pos = vec(el.fields.get('pos'));
+        if (!Array.isArray(pos)) continue;
+        const ypr = vec(el.fields.get('ypr'));
+        const scale = num(el.fields.get('scale'));
+        out.push({
+          id: el.id,
+          class: el.fields.get('name') ?? '',
+          position: pos,
+          orientation: Array.isArray(ypr) ? ypr : [0, 0, 0],
+          scale: typeof scale === 'number' && scale > 0 ? scale : 1,
+        });
+      }
+      return out;
+    });
+    return { key: `${r.server}/${r.sessionId}`, handle: r.handle, map: r.map, objects };
   }
 
   // ------------------------------------------------------------ changing the scene

@@ -58,6 +58,33 @@ returns a token to the agent.
 | `DZSTUDIO_MCP_SERVERS` | Servers added on start if missing: `name=url,name=url` |
 | `DZSTUDIO_MCP_AGENT_NAME` | Short name of the agent (default `Agent`) |
 | `DZSTUDIO_MCP_CONFIG_DIR` | Where settings and tokens are kept |
+| `DZSTUDIO_MCP_WORLD_DATA` | Class and map data: a folder or a `file://`/`https://` base address (overrides `worldData.base`) |
+| `DZSTUDIO_MCP_WORLD_DATA_POINTER` | Pointer to the current revisions for a base address (overrides `worldData.pointer`) |
+
+### Class and map data
+
+The world tools compute on static data: per world 256 m tiles with terrain heights, surface, walkable surfaces and
+static objects, and one class index with boxes, dimensions and shape rasters. By default they come from dzbot
+(`https://uploads.dzbot.de/world-data/`, current revisions from `https://dzbot.de/api/public/world-data`). Another
+source is set once in `config.json`:
+
+```json
+{ "worldData": { "base": "file:///srv/world-data/" } }
+```
+
+or a mirror with its own pointer:
+
+```json
+{ "worldData": { "base": "https://mirror.example.org/world-data/", "pointer": "https://mirror.example.org/world-data.json" } }
+```
+
+A local folder has the published layout (`classes/<revision>/…`, `worlds/<world>/<revision>/…`); its newest revisions
+are used and the map key comes from each manifest. Downloaded files are kept in `cache/` of the config directory below
+their revision and never requested again; every tile and raster is checked against size and SHA-256 from the manifest,
+a changed file in the cache is loaded once more, and a file that stays wrong is reported as "map data corrupt". The
+session's map key (e.g. `chernarus`) picks the world; the revision stays the same for the whole session. Missing data
+are "unknown", never zero: a class without data has "box unknown", a map without data gives "No map data for ‹map› —
+project objects only", and a tile that cannot be loaded is named in the answer.
 
 ## Tools
 
@@ -71,7 +98,12 @@ returns a token to the agent.
 | `create_objects`, `modify_objects`, `delete_objects` | Each call is one step for everyone; objects are locked first |
 | `release` | Let others edit objects the agent holds |
 | `set_status`, `request_review` | Phase (waiting for work, working, waiting for review) and the status line everyone sees |
-| `world_info`, `world_objects`, `ground_at`, `object_ground`, `check_overlap`, `class_info` | Map and class data — not available yet |
+| `world_info` | World, data revisions, game version and export date for the session's map; place names near a point or by text |
+| `world_objects` | Static map objects and project objects whose box touches a circle or rectangle, with transform, distance and size or "box unknown" |
+| `ground_at` | Terrain height, material, water, roads and building floors at up to 1000 points; the highest surface below a height |
+| `object_ground` | How project objects or a hypothetical placement stand: "floats ‹x› m", "‹x› m in the ground", or the corner distances |
+| `check_overlap` | Which map and project objects intersect, as rotated boxes with penetration depth; objects without a known box are named |
+| `class_info` | Size, clipping and collision box, radius, flags and raster of classes or models |
 
 Some rules the MCP keeps for the agent: it joins only servers that announce the `agents` capability, so nobody sees it
 as a human; it changes an existing object only while holding its lock; it never saves, invites, removes anyone or
@@ -89,11 +121,17 @@ npm run format
 The integration test builds the reference server from `../collab-server` (or `DZCOLLAB_SOURCE`), or uses the binary in
 `DZCOLLAB_SERVER`, and runs it on a free port on 127.0.0.1. Without Go and without a binary it is skipped.
 
+The world tools are tested on a tiny world in `test/fixtures/world-data`, made with the reference converter. An opt-in
+test compares every answer with the converter's JavaScript reader on a full converted world: it runs when
+`DZSTUDIO_MCP_WORLD_DATA_REFERENCE` (default `/tmp/world-data-out`) holds one and `DZSTUDIO_MCP_WORLD_DATA_READER` points
+to `world_data_read.js`; `DZSTUDIO_MCP_WORLD_DATA_WORLD` picks the world (default `chernarusplus`).
+
 | Directory | Content |
 | --- | --- |
 | `src/scene` | The project state outside the game: text form, numbers, chunks, ids, applying operations, building new ones |
 | `src/protocol` | The dzcollab 1 client: requests, the session with its poll and send channel |
-| `src/config` | Servers, agent name and tokens, configured once |
+| `src/config` | Servers, agent name, tokens and the world data source, configured once |
+| `src/world` | Class and map data: file formats, loading and cache, and the geometry behind the world tools |
 | `src/mcp` | The tools and the MCP wiring |
 
 ## License

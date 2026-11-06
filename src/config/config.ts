@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { randomToken } from '../scene/ids.js';
 
 /**
@@ -18,6 +19,15 @@ export interface Config {
   /** Author id in operations: 16 characters from 0–9 and a–z, never changed. */
   installationId: string;
   servers: ServerEntry[];
+  /** Where class and map data come from; default dzbot's published data. */
+  worldData?: WorldDataSettings;
+}
+
+export interface WorldDataSettings {
+  /** `https://…/` base address or `file:///…/` folder with the published layout. */
+  base?: string;
+  /** Pointer to the current revisions; only for a base address. */
+  pointer?: string;
 }
 
 export interface Credential {
@@ -111,6 +121,7 @@ export class ConfigStore {
         ? stored.servers.filter((s) => s && typeof s.name === 'string' && typeof s.url === 'string')
         : [],
     };
+    if (stored.worldData && typeof stored.worldData === 'object') config.worldData = stored.worldData;
     if (config.installationId !== stored.installationId) dirty = true;
     if (this.env.DZSTUDIO_MCP_AGENT_NAME && config.agentName !== this.env.DZSTUDIO_MCP_AGENT_NAME) {
       config.agentName = this.env.DZSTUDIO_MCP_AGENT_NAME;
@@ -128,6 +139,18 @@ export class ConfigStore {
     this.config = config;
     if (dirty) this.save();
     return config;
+  }
+
+  /** World data settings: `DZSTUDIO_MCP_WORLD_DATA` (and `…_POINTER`) win over config.json, without being stored. */
+  worldData(): WorldDataSettings & { cacheDir: string } {
+    const out: WorldDataSettings & { cacheDir: string } = { ...this.load().worldData, cacheDir: join(this.dir, 'cache') };
+    const base = this.env.DZSTUDIO_MCP_WORLD_DATA;
+    if (base) {
+      out.base = /^[a-z]+:\/\//.test(base) ? base : pathToFileURL(resolve(base)).href;
+      delete out.pointer;
+    }
+    if (this.env.DZSTUDIO_MCP_WORLD_DATA_POINTER) out.pointer = this.env.DZSTUDIO_MCP_WORLD_DATA_POINTER;
+    return out;
   }
 
   save(): void {

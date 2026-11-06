@@ -1,0 +1,52 @@
+{
+  "format": 1,
+  "revision": "1.30-1",
+  "game": "1.30.164078",
+  "license": {
+    "name": "CC BY 4.0",
+    "url": "https://creativecommons.org/licenses/by/4.0/",
+    "attribution": "World data by dzbot (https://dzbot.de), measured in the running game DayZ"
+  },
+  "shapes": {
+    "78418a90bae8ad66": {
+      "shape": "dz\\gear\\camping\\wooden_case.p3d",
+      "scan": "dynamic",
+      "clip": [-1.75, 0, -1.18, 1.4, 0.83, 1.15],
+      "collision": [-0.2, 0, -0.4, 0.21, 0.23, 0.4],
+      "size": [3.15, 0.83, 2.33],
+      "radius": 2.1,
+      "raster": null
+    },
+    "f355cdc05079d903": {
+      "shape": "dz\\structures\\military\\houses\\mil_barracks2.p3d",
+      "scan": "scanned",
+      "clip": [-12.88, -4.04, -5.16, 12.88, 4.04, 5.16],
+      "collision": [-10.73, -3.37, -4.3, 8.23, 3.37, 4.3],
+      "size": [25.76, 8.08, 10.32],
+      "radius": 13.96,
+      "raster": {
+        "step": 0.2,
+        "x0": -13.277,
+        "z0": -5.56,
+        "nx": 134,
+        "nz": 57,
+        "bytes": 3286,
+        "sha256": "b2aaafdaef87003dc0d9d7dbae75a621e0d2825e6d194d2af7af2acc27849665"
+      }
+    },
+    "f88768ffc83249c0": {
+      "shape": "dz\\test\\powerline.p3d",
+      "scan": "failed",
+      "clip": [-60, 0, -0.5, 60, 10, 0.5],
+      "collision": null,
+      "size": [120, 10, 1],
+      "radius": 60.21,
+      "raster": null
+    }
+  },
+  "classes": {
+    "Land_Mil_Barracks2": { "shape": "f355cdc05079d903", "flags": 273 },
+    "Land_Test_PowerLine": { "shape": "f88768ffc83249c0", "flags": 1 },
+    "WoodenCrate": { "shape": "78418a90bae8ad66", "flags": 48 }
+  }
+}
