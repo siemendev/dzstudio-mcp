@@ -52,6 +52,7 @@ returns a token to the agent.
 | `DZSTUDIO_MCP_SERVERS` | Servers added on start if missing: `name=url,name=url` |
 | `DZSTUDIO_MCP_AGENT_NAME` | Short name of the agent (default `Agent`) |
 | `DZSTUDIO_MCP_CONFIG_DIR` | Where settings and tokens are kept |
+| `DZSTUDIO_MCP_CACHE_LIMIT_MB` | Size limit of the map data cache in MB (default 2048) |
 | `DZSTUDIO_MCP_WORLD_DATA` | Class and map data: a folder or a `file://`/`https://` base address (overrides `worldData.base`) |
 | `DZSTUDIO_MCP_WORLD_DATA_POINTER` | Pointer to the current revisions for a base address (overrides `worldData.pointer`) |
 
