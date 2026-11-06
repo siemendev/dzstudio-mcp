@@ -23,7 +23,10 @@ describe('transport', () => {
         req.on('end', () => {
           seen.push({ url: req.url!, method: req.method!, body });
           if (req.url!.endsWith('/broken')) res.end('<html>502</html>');
-          else if (req.url!.endsWith('/info')) res.end('dzcollab 1\n{"ok":true,"server":{"name":"T"},"protocols":[{"major":1,"minor":0}],"capabilities":["agents"],"auth":[{"method":"code"}],"limits":{}}');
+          else if (req.url!.endsWith('/info'))
+            res.end(
+              'dzcollab 1\n{"ok":true,"server":{"name":"T"},"protocols":[{"major":1,"minor":0}],"capabilities":["agents"],"auth":[{"method":"code"}],"limits":{}}',
+            );
           else res.end('dzcollab 1\n{"ok":false,"error":{"code":"not_allowed","message":"no"}}');
         });
       });
@@ -61,7 +64,7 @@ describe('client', () => {
     const fake = new FakeServer();
     const c = new CollabClient(fake);
     const start = await c.codeStart(agentClient('Scout'));
-    expect(start).toMatchObject({ loginCode: 'CODE1', intervalSeconds: 2 });
+    expect(start).toMatchObject({ loginCode: 'ABCD0001', intervalSeconds: 2 });
     expect(fake.requests[0]!.body.client).toEqual({ name: 'dzstudio-mcp', version: '0.1.0', kind: 'agent', agentName: 'Scout' });
     expect(await c.codePoll(start.loginCode)).toEqual({ state: 'waiting' });
     fake.codeLogins.set(start.loginCode, { state: 'confirmed', name: 'Patrick' });

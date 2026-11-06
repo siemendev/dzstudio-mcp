@@ -1,4 +1,14 @@
-import { isObject, JsonError, parseJson, writeInt, writeString, writeStringMap, sortedKeys, type JsonObject, type JsonValue } from './json.js';
+import {
+  isObject,
+  JsonError,
+  parseJson,
+  writeInt,
+  writeString,
+  writeStringMap,
+  sortedKeys,
+  type JsonObject,
+  type JsonValue,
+} from './json.js';
 import { TEXTFORM } from './types.js';
 
 export interface Comp {

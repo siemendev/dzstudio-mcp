@@ -134,7 +134,10 @@ describe('session', () => {
     expect(log[0]!.chain).toBeUndefined();
     const chain = log.slice(1);
     expect(chain.length).toBe(2);
-    expect(chain.map((e) => e.chain)).toEqual([{ index: 0, count: 2 }, { index: 1, count: 2 }]);
+    expect(chain.map((e) => e.chain)).toEqual([
+      { index: 0, count: 2 },
+      { index: 1, count: 2 },
+    ]);
     for (const e of log) for (const p of e.parts.flat()) expect(Buffer.byteLength(p)).toBeLessThanOrEqual(1000);
     const items = server.requests.filter((x) => x.endpoint === 'ops/send').flatMap((x) => x.body.ops);
     expect(new Set(items.map((i: { clientSeq: number }) => i.clientSeq))).toEqual(new Set([1, 2, 3]));
@@ -193,7 +196,12 @@ describe('session', () => {
     const server = new FakeServer();
     const host = server.createSession({ kind: 'hosted', state: golden.Z1!, hostedRef: { provider: 'fake', key: 'a' } });
     const s = await CollabSession.join(
-      { client: new CollabClient(server), token: () => 't-agent-Patrick', clientInfo: agentClient(), timing: { pollWaitMs: 100, retryDelayMs: 10 } },
+      {
+        client: new CollabClient(server),
+        token: () => 't-agent-Patrick',
+        clientInfo: agentClient(),
+        timing: { pollWaitMs: 100, retryDelayMs: 10 },
+      },
       host.sessionId,
     );
     open.push(s);
@@ -214,7 +222,9 @@ describe('session', () => {
     const { server, host, s } = await setup();
     server.appendAs(host.sessionId, host.participantId, 'q8w7e6r5t4-3', golden.R3!.replace('k3f9a0x2mq-4', FLAG));
     await until(() => s.state === 'lost');
-    expect(s.drainEvents().map((e) => e.text)).toContain('This session needs a newer dzStudio MCP (operation type of plugin agent, version 1)');
+    expect(s.drainEvents().map((e) => e.text)).toContain(
+      'This session needs a newer dzStudio MCP (operation type of plugin agent, version 1)',
+    );
     await until(() => server.count('session/leave') === 1);
   });
 

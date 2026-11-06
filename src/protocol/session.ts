@@ -251,7 +251,9 @@ export class CollabSession {
   private async downloadSnapshot(seq: number, parts: number): Promise<string> {
     const all: string[] = [];
     for (let part = 0; part < parts; part++) {
-      const res = await this.withRetry(() => this.client.request('snapshot/get', { ...this.ids(), seq, part }, this.opts.token(), this.timing.requestTimeoutMs));
+      const res = await this.withRetry(() =>
+        this.client.request('snapshot/get', { ...this.ids(), seq, part }, this.opts.token(), this.timing.requestTimeoutMs),
+      );
       all.push(...(res.pieces as string[]));
     }
     return all.join('');
@@ -298,6 +300,11 @@ export class CollabSession {
 
   get active(): boolean {
     return this.state === 'active';
+  }
+
+  /** How long the connection has been interrupted, 0 if it is not. */
+  get interruptedMs(): number {
+    return this.interruptedSince === undefined ? 0 : Date.now() - this.interruptedSince;
   }
 
   private finish(state: SessionState, text: string, kind: SessionEvent['kind']): void {
@@ -472,7 +479,8 @@ export class CollabSession {
         ((res.notices?.list ?? []) as Json[]).filter((n) => n.kind === 'participant_removed').map((n) => n.participantId),
       );
       for (const [id, p] of before) {
-        if (!nowIds.has(id) && !removedIds.has(id)) this.emit({ kind: 'left', text: `${displayName(p)} left`, data: { participantId: id } });
+        if (!nowIds.has(id) && !removedIds.has(id))
+          this.emit({ kind: 'left', text: `${displayName(p)} left`, data: { participantId: id } });
       }
       this.participants = after;
     }
@@ -653,7 +661,8 @@ export class CollabSession {
     if (!this.active) return { status: 'rejected', message: this.stateText || 'Not in a session' };
     const check = this.view(() => this.scene.tentative([op], (r) => r[0]!));
     if (check.result !== 'applied') {
-      const message = check.result === 'precondition' ? `Step no longer possible: ${check.message}` : `Operation not valid: ${check.result}`;
+      const message =
+        check.result === 'precondition' ? `Step no longer possible: ${check.message}` : `Operation not valid: ${check.result}`;
       return { status: 'rejected', message };
     }
     let items: SendItem[];
@@ -678,8 +687,10 @@ export class CollabSession {
     const result = await Promise.race([done, timeout]);
     if (result.status === 'unconfirmed') {
       void done.then((r) => {
-        if (r.status === 'applied') this.emit({ kind: 'step_applied', text: `Step ${op.id} was applied`, data: { opId: op.id, seq: r.seq } });
-        else if (r.status === 'dropped' || r.status === 'rejected') this.emit({ kind: 'step_dropped', text: r.message, data: { opId: op.id } });
+        if (r.status === 'applied')
+          this.emit({ kind: 'step_applied', text: `Step ${op.id} was applied`, data: { opId: op.id, seq: r.seq } });
+        else if (r.status === 'dropped' || r.status === 'rejected')
+          this.emit({ kind: 'step_dropped', text: r.message, data: { opId: op.id } });
       });
     } else if (result.status === 'dropped') {
       this.emit({ kind: 'step_dropped', text: result.message, data: { opId: op.id } });

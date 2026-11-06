@@ -110,7 +110,10 @@ export class FakeServer implements Transport {
   private member(s: Session, req: Json): Participant | Json {
     const p = s.participants.find((x) => x.participantId === req.participantId);
     if (!p) return this.err('not_participant', { reason: 'timeout' });
-    if (!p.active) return p.removedBy ? this.err('not_participant', { reason: 'removed', by: p.removedBy }) : this.err('not_participant', { reason: 'timeout' });
+    if (!p.active)
+      return p.removedBy
+        ? this.err('not_participant', { reason: 'removed', by: p.removedBy })
+        : this.err('not_participant', { reason: 'timeout' });
     return p;
   }
 
@@ -130,7 +133,7 @@ export class FakeServer implements Transport {
       };
     }
     if (endpoint === 'auth/code/start') {
-      const code = `CODE${this.nextId++}`;
+      const code = `ABCD${String(this.nextId++).padStart(4, '0')}`;
       this.codeLogins.set(code, { state: 'waiting' });
       return { ok: true, loginCode: code, url: `https://fake/login?code=${code}`, expiresInSeconds: 600, intervalSeconds: 2 };
     }
@@ -149,7 +152,10 @@ export class FakeServer implements Transport {
   }
 
   /** Creates a session as a studio (the test's human host) with a snapshot already uploaded. */
-  createSession(opts: { kind?: 'local' | 'hosted'; state: string; host?: string; hostedRef?: Json }): { sessionId: string; participantId: string } {
+  createSession(opts: { kind?: 'local' | 'hosted'; state: string; host?: string; hostedRef?: Json }): {
+    sessionId: string;
+    participantId: string;
+  } {
     const id = `s${this.nextId++}`;
     const s: Session = {
       id,
@@ -250,7 +256,13 @@ export class FakeServer implements Transport {
 
   save(sessionId: string, by: string): void {
     const s = this.sessions.get(sessionId)!;
-    s.saving = { state: 'saved', savedSeq: s.log.length, unsavedCount: 0, savedBy: { userId: 'u-' + by.toLowerCase(), name: by }, savedSecondsAgo: 0 };
+    s.saving = {
+      state: 'saved',
+      savedSeq: s.log.length,
+      unsavedCount: 0,
+      savedBy: { userId: 'u-' + by.toLowerCase(), name: by },
+      savedSecondsAgo: 0,
+    };
     s.ver.saving++;
     this.notify(s);
   }
@@ -281,14 +293,24 @@ export class FakeServer implements Transport {
           ok: true,
           sessions: [...this.sessions.values()]
             .filter((s) => !s.ended && (!req.hostedRef || JSON.stringify(s.hostedRef) === JSON.stringify(req.hostedRef)))
-            .map((s) => ({ sessionId: s.id, kind: s.kind, projectName: s.projectName, map: s.map, participants: s.participants.length, access: 'direct', hostedRef: s.hostedRef })),
+            .map((s) => ({
+              sessionId: s.id,
+              kind: s.kind,
+              projectName: s.projectName,
+              map: s.map,
+              participants: s.participants.length,
+              access: 'direct',
+              hostedRef: s.hostedRef,
+            })),
         };
       case 'project/list':
         return { ok: true, projects: this.projects, stores: [{ provider: 'fake', canCreate: true }] };
       case 'session/join':
         return this.join(req, u);
       case 'invite/redeem':
-        return req.code === 'GOOD-CODE' ? { ok: true, sessionId: [...this.sessions.keys()][0], kind: 'local', projectName: 'Basis', map: 'chernarus' } : this.err('invite_invalid');
+        return req.code === 'GOOD-CODE'
+          ? { ok: true, sessionId: [...this.sessions.keys()][0], kind: 'local', projectName: 'Basis', map: 'chernarus' }
+          : this.err('invite_invalid');
     }
     const s = this.session(req);
     if ('ok' in s) return s;
@@ -353,10 +375,24 @@ export class FakeServer implements Transport {
     const kind = req.client?.kind === 'agent' && this.capabilities.includes('agents') ? 'agent' : 'studio';
     if (req.resume) {
       const p = s.participants.find((x) => x.participantId === req.resume.participantId);
-      if (!p || !p.active) return this.err('not_participant', p?.removedBy ? { reason: 'removed', by: p.removedBy } : { reason: 'timeout' });
-      return { ok: true, participantId: p.participantId, colour: p.colour, kind: s.kind, role: p.role, canInvite: p.canInvite, canSave: p.canSave, canManage: p.canManage, mode: 'resume', seq: s.log.length, capabilities: [] };
+      if (!p || !p.active)
+        return this.err('not_participant', p?.removedBy ? { reason: 'removed', by: p.removedBy } : { reason: 'timeout' });
+      return {
+        ok: true,
+        participantId: p.participantId,
+        colour: p.colour,
+        kind: s.kind,
+        role: p.role,
+        canInvite: p.canInvite,
+        canSave: p.canSave,
+        canManage: p.canManage,
+        mode: 'resume',
+        seq: s.log.length,
+        capabilities: [],
+      };
     }
-    if (s.participants.some((x) => x.active && req.instanceKey && (x as Json).instanceKey === req.instanceKey)) return this.err('instance_key_taken');
+    if (s.participants.some((x) => x.active && req.instanceKey && (x as Json).instanceKey === req.instanceKey))
+      return this.err('instance_key_taken');
     const p = this.addParticipant(s, u, kind);
     (p as Json).instanceKey = req.instanceKey;
     const snapSeq = Math.max(...s.snapshots.keys());
@@ -464,7 +500,10 @@ export class FakeServer implements Transport {
     }
     if (signal?.aborted) throw new UnreachableError('aborted');
     if (s.ended) return this.err('session_ended', s.ended);
-    if (!p.active) return p.removedBy ? this.err('not_participant', { reason: 'removed', by: p.removedBy }) : this.err('not_participant', { reason: 'timeout' });
+    if (!p.active)
+      return p.removedBy
+        ? this.err('not_participant', { reason: 'removed', by: p.removedBy })
+        : this.err('not_participant', { reason: 'timeout' });
     const out: Json = { ok: true, seq: s.log.length, more: false, ops: [], presence: [] };
     for (const e of s.log.slice(req.after)) {
       e.parts.forEach((pieces, i) => {
@@ -481,7 +520,17 @@ export class FakeServer implements Transport {
     if (s.ver.participants > (v.participants ?? 0)) {
       out.participants = {
         version: s.ver.participants,
-        list: visible.map((x) => ({ participantId: x.participantId, userId: x.userId, name: x.name, colour: x.colour, role: x.role, canInvite: x.canInvite, canSave: x.canSave, canManage: x.canManage, kind: x.kind })),
+        list: visible.map((x) => ({
+          participantId: x.participantId,
+          userId: x.userId,
+          name: x.name,
+          colour: x.colour,
+          role: x.role,
+          canInvite: x.canInvite,
+          canSave: x.canSave,
+          canManage: x.canManage,
+          kind: x.kind,
+        })),
       };
     }
     out.presence = visible.map((x) => {
@@ -495,9 +544,15 @@ export class FakeServer implements Transport {
     });
     if (s.ver.saving > (v.saving ?? 0)) out.saving = { version: s.ver.saving, ...s.saving };
     if (s.ver.locks > (v.locks ?? 0)) {
-      out.locks = { version: s.ver.locks, holders: s.participants.filter((x) => x.active && x.elements.size).map((x) => ({ participantId: x.participantId, lapsed: false, elements: [...x.elements] })) };
+      out.locks = {
+        version: s.ver.locks,
+        holders: s.participants
+          .filter((x) => x.active && x.elements.size)
+          .map((x) => ({ participantId: x.participantId, lapsed: false, elements: [...x.elements] })),
+      };
     }
-    if (p.noticeVer > (v.notices ?? 0)) out.notices = { version: p.noticeVer, list: p.notices.filter((n) => n.version > (v.notices ?? 0)).map((n) => n.n) };
+    if (p.noticeVer > (v.notices ?? 0))
+      out.notices = { version: p.noticeVer, list: p.notices.filter((n) => n.version > (v.notices ?? 0)).map((n) => n.n) };
     if (s.checkpointFrom === p.participantId) {
       out.checkpointWanted = true;
       (p as Json).cpSent = true;
