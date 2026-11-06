@@ -11,34 +11,28 @@ session saves or discards.
 
 ## Setup (once)
 
-Requires Node.js 22 or newer.
+Requires Node.js 22 or newer. Add it to your MCP client, for example in Claude Code:
 
 ```bash
-git clone <this repository> dzstudio-mcp
-cd dzstudio-mcp
-npm install
-npm run build
+claude mcp add dzstudio -e DZSTUDIO_MCP_SERVERS=dzbot=https://collab.dzbot.de/dzcollab/ -e DZSTUDIO_MCP_AGENT_NAME=Scout -- npx -y @dzbot/dzstudio-mcp
 ```
 
-Add it to your MCP client, for example in Claude Code:
-
-```bash
-claude mcp add dzstudio -- node /path/to/dzstudio-mcp/dist/index.js
-```
-
-or in a client's JSON configuration:
+or in a client's JSON configuration (Claude Desktop, Cursor and others):
 
 ```json
 {
   "mcpServers": {
     "dzstudio": {
-      "command": "node",
-      "args": ["/path/to/dzstudio-mcp/dist/index.js"],
-      "env": { "DZSTUDIO_MCP_SERVERS": "home=https://collab.example.org/dzcollab/", "DZSTUDIO_MCP_AGENT_NAME": "Scout" }
+      "command": "npx",
+      "args": ["-y", "@dzbot/dzstudio-mcp"],
+      "env": { "DZSTUDIO_MCP_SERVERS": "dzbot=https://collab.dzbot.de/dzcollab/", "DZSTUDIO_MCP_AGENT_NAME": "Scout" }
     }
   }
 }
 ```
+
+Use your own server's address instead of dzbot's if you run the collaboration server yourself. To run it from a
+checkout instead: `npm install && npm run build`, then `node /path/to/dzstudio-mcp/dist/index.js` as the command.
 
 That is all the configuration there is. From then on you work in the conversation:
 

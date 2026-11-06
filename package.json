@@ -1,5 +1,5 @@
 {
-  "name": "dzstudio-mcp",
+  "name": "@dzbot/dzstudio-mcp",
   "version": "0.1.0",
   "description": "MCP server that lets an AI agent join dzStudio collaboration sessions (dzcollab 1) as a headless participant",
   "license": "AGPL-3.0-only",
@@ -24,7 +24,8 @@
     "test": "vitest run",
     "start": "node dist/index.js",
     "format": "prettier --write src test",
-    "format:check": "prettier --check src test"
+    "format:check": "prettier --check src test",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
@@ -35,5 +36,15 @@
     "prettier": "^3.9.10",
     "typescript": "^7.0.2",
     "vitest": "^4.1.12"
+  },
+  "keywords": [
+    "mcp",
+    "dayz",
+    "dzstudio",
+    "ai-agents",
+    "model-context-protocol"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }
