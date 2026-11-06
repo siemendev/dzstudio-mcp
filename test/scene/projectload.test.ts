@@ -85,10 +85,18 @@ function comp(scene: Scene, id: string, type: string): unknown {
 }
 
 describe('opening a hosted project from its files', () => {
-  it('G1: the project "Objekte" with the flag pole loads byte for byte as in the golden example', () => {
+  it('reads the project file under its current and its former name', () => {
+    for (const name of ['project.dzstudio.json', 'projekt.dzstudio.json']) {
+      expect(neededForLoad(name)).toBe(true);
+      const { state } = load({ [name]: manifest([groupEntry('objects.json', 'Objects', '#60A5FA', 1)]), 'objects.json': spawner([FLAG]) });
+      expect(state).toBe(golden.Z1);
+    }
+  });
+
+  it('G1: the project "Objects" with the flag pole loads byte for byte as in the golden example', () => {
     const files = {
-      manifest: manifest([groupEntry('objekte.json', 'Objekte', '#60A5FA', 1)]),
-      'objekte.json': spawner([FLAG]),
+      manifest: manifest([groupEntry('objects.json', 'Objects', '#60A5FA', 1)]),
+      'objects.json': spawner([FLAG]),
     };
     const { op, state } = load(files);
     expect(writeOperation(op)).toBe(golden.G1);
@@ -99,12 +107,12 @@ describe('opening a hosted project from its files', () => {
     const crate: SpawnerObject = { name: 'WoodenCrate', pos: [10, 20, 30], ypr: [0, 0, 0] };
     const files = {
       manifest: manifest([
-        groupEntry('objekte.json', 'Objekte', '#60A5FA', 2, [
+        groupEntry('objects.json', 'Objects', '#60A5FA', 2, [
           { index: 1, name: 'WoodenCrate', pos: [10, 20, 30], hidden: true, locked: false },
           { index: 7, name: 'StaticFlagPole', pos: [1234.5679, 150.125, 9876.543], hidden: false, locked: true },
         ]),
       ]),
-      'objekte.json': spawner([FLAG, crate]),
+      'objects.json': spawner([FLAG, crate]),
     };
     const { scene, notes } = load(files);
     expect(scene.get('k3f9a0x2mq-2')).toMatchObject({ hidden: false, locked: true });
@@ -115,11 +123,11 @@ describe('opening a hosted project from its files', () => {
   it('lifts a hide that no longer matches the file and says so', () => {
     const files = {
       manifest: manifest([
-        groupEntry('objekte.json', 'Objekte', '#60A5FA', 1, [
+        groupEntry('objects.json', 'Objects', '#60A5FA', 1, [
           { index: 0, name: 'StaticFlagPole', pos: [1, 2, 3], hidden: true, locked: false },
         ]),
       ]),
-      'objekte.json': spawner([FLAG]),
+      'objects.json': spawner([FLAG]),
     };
     const { scene, notes } = load(files);
     expect(scene.get('k3f9a0x2mq-2')!.hidden).toBe(false);
@@ -148,9 +156,9 @@ describe('opening a hosted project from its files', () => {
   });
 
   it('without a project file every group file becomes a group', () => {
-    const { scene, notes, state } = load({ 'objekte.json': spawner([FLAG]) });
+    const { scene, notes, state } = load({ 'objects.json': spawner([FLAG]) });
     const g = scene.get('k3f9a0x2mq-1')!;
-    expect(g.fields.get('name')).toBe('objekte');
+    expect(g.fields.get('name')).toBe('objects');
     expect(g.comp.get('projects:plugins')).toEqual({ v: 1, d: '[]' });
     expect(readStateText(state).elements).toHaveLength(3);
     expect(notes.join()).toContain('missing');
@@ -161,8 +169,8 @@ describe('opening a hosted project from its files', () => {
       '{"Objects":[{"name":"WoodenCrate","pos":[1,2,3],"ypr":null,"scale":0,"enableCEPersistency":true,' +
       '"customString":null,"extra": {"a" : [1, 2]},"extra":"last","Ünbekannt":1e999}],"Version" : 2}';
     const files = {
-      manifest: manifest([groupEntry('objekte.json', 'Objekte', '#60A5FA', 1)], '{\n            "mine": {"x": 1}\n        }'),
-      'objekte.json': file,
+      manifest: manifest([groupEntry('objects.json', 'Objects', '#60A5FA', 1)], '{\n            "mine": {"x": 1}\n        }'),
+      'objects.json': file,
     };
     const { scene } = load(files);
     expect(scene.get('project')!.comp.get('projects:plugins')!.d).toBe('[["mine","\\"mine\\"","{\\"x\\": 1}"]]');
@@ -195,7 +203,7 @@ describe('opening a hosted project from its files', () => {
 
   it('replaces a number outside float32 and marks unknown classes as placeholders', () => {
     const file = '﻿{"Objects":[{"name":"ModdedThing","pos":[1e39,0,-0],"ypr":[0,0,0]},{"name":"","pos":[0,0,0]}]}';
-    const { scene } = load({ 'objekte.json': file });
+    const { scene } = load({ 'objects.json': file });
     const [a, b] = scene.children('k3f9a0x2mq-1');
     expect(scene.get(a!)!.fields.get('pos')).toBe('0.0 0.0 0.0');
     expect(comp(scene, a!, 'spawner:read')).toMatchObject({
@@ -246,7 +254,7 @@ describe('opening a hosted project from its files', () => {
     expect(
       [
         'manifest',
-        'objekte.json',
+        'objects.json',
         'Sub/B.JSON',
         'mapgroupproto.xml',
         'cfggameplay.json',
@@ -254,6 +262,6 @@ describe('opening a hosted project from its files', () => {
         '../x.json',
         'notes.txt',
       ].filter(neededForLoad),
-    ).toEqual(['manifest', 'objekte.json', 'Sub/B.JSON']);
+    ).toEqual(['manifest', 'objects.json', 'Sub/B.JSON']);
   });
 });

@@ -162,7 +162,7 @@ export class FakeServer implements Transport {
     const s: Session = {
       id,
       kind: opts.kind ?? 'local',
-      projectName: 'Basis',
+      projectName: 'Base',
       map: opts.map ?? 'chernarus',
       hostedRef: opts.hostedRef,
       log: [],
@@ -311,7 +311,7 @@ export class FakeServer implements Transport {
         return this.join(req, u);
       case 'invite/redeem':
         return req.code === 'GOOD-CODE'
-          ? { ok: true, sessionId: [...this.sessions.keys()][0], kind: 'local', projectName: 'Basis', map: 'chernarus' }
+          ? { ok: true, sessionId: [...this.sessions.keys()][0], kind: 'local', projectName: 'Base', map: 'chernarus' }
           : this.err('invite_invalid');
     }
     const s = this.session(req);

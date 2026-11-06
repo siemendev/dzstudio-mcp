@@ -88,8 +88,8 @@ describe('float32 text', () => {
 
 describe('JSON', () => {
   it('writes the example string with exactly the given escapes', () => {
-    const text = 'Kiste "A"\\Lager\nZeile\t2\u0001 ä/';
-    expect(writeString(text)).toBe('"Kiste \\"A\\"\\\\Lager\\nZeile\\t2\\u0001 ä/"');
+    const text = 'Crate "A"\\Camp\nLine\t2\u0001 ä/';
+    expect(writeString(text)).toBe('"Crate \\"A\\"\\\\Camp\\nLine\\t2\\u0001 ä/"');
   });
 
   it('escapes control bytes with lowercase hex and keeps byte 127 raw', () => {

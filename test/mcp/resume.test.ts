@@ -97,7 +97,7 @@ describe('returning to sessions after a restart', () => {
     expect(listed.data.sessions).toMatchObject([
       { session: 's1', sessionId: host.sessionId, phase: 'working', status: 'a crate by the flag' },
     ]);
-    expect(listed.text).toContain('[s1] Back in Basis after a restart');
+    expect(listed.text).toContain('[s1] Back in Base after a restart');
     const join_ = fake.requests.filter((r) => r.endpoint === 'session/join').at(-1)!.body;
     expect(join_).toMatchObject({ instanceKey: prefix, resume: { participantId: me.participantId, after: 1 } });
 
@@ -121,7 +121,7 @@ describe('returning to sessions after a restart', () => {
 
     const second = await start(fake, store);
     const listed = await second.call('list_sessions');
-    expect(listed.text).toContain('[s1] Joined Basis again after a restart');
+    expect(listed.text).toContain('[s1] Joined Base again after a restart');
     expect(agents(fake, host.sessionId).filter((p) => p.active)).toHaveLength(1);
     expect((await second.call('query_objects', { class: 'WoodenCrate' })).data.total).toBe(1);
   });
@@ -174,7 +174,7 @@ describe('returning to sessions after a restart', () => {
     const second = await start(fake, store);
     const listed = await second.call('list_sessions');
     expect(listed.text).toMatch(/Not in any session/);
-    expect(listed.text).toContain('Could not return to Basis after a restart');
+    expect(listed.text).toContain('Could not return to Base after a restart');
     expect(existsSync(join(store.dir, 'sessions')) ? readdirSync(join(store.dir, 'sessions')) : []).toEqual([]);
   });
 });

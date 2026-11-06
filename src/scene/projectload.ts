@@ -15,7 +15,8 @@ import { writeString } from './json.js';
 import { parseSrc, SrcUnsupported, type SrcDoc, type SrcNode } from './srcjson.js';
 import type { Change, Comp, Element, Operation } from './textform.js';
 
-export const PROJECT_FILE = 'projekt.dzstudio.json';
+export const PROJECT_FILE = 'project.dzstudio.json';
+const LEGACY_PROJECT_FILE = 'projekt.dzstudio.json';
 const PROJECT_FILE_VERSION = 1;
 const PALETTE = ['#60A5FA', '#FB923C', '#2DD4BF', '#F472B6', '#A3E635', '#FDE047', '#94A3B8', '#E879F9'];
 const KNOWN_ENTRY_KEYS = ['name', 'pos', 'ypr', 'scale', 'enableCEPersistency', 'customString'];
@@ -63,7 +64,18 @@ function isNeverGroup(rel: string): boolean {
   const low = lowerAscii(rel);
   const leaf = low.slice(low.lastIndexOf('/') + 1);
   if (low.startsWith('vanilla/')) return true;
-  return ['projekt.dzstudio.json', 'cfggameplay.json', 'mapgroupproto.xml', 'mapgrouppos.xml', 'cfglimitsdefinition.xml'].includes(leaf);
+  return [
+    PROJECT_FILE,
+    LEGACY_PROJECT_FILE,
+    'cfggameplay.json',
+    'mapgroupproto.xml',
+    'mapgrouppos.xml',
+    'cfglimitsdefinition.xml',
+  ].includes(leaf);
+}
+
+function isProjectFile(name: string): boolean {
+  return name === 'manifest' || name === PROJECT_FILE || name === LEGACY_PROJECT_FILE;
 }
 
 function invalidRel(rel: string): boolean {
@@ -73,7 +85,7 @@ function invalidRel(rel: string): boolean {
 
 /** Whether opening needs this file of the store: the project file and every file that can become a group. */
 export function neededForLoad(name: string): boolean {
-  return name === 'manifest' || name === PROJECT_FILE || (!invalidRel(name) && handlesFile(name));
+  return isProjectFile(name) || (!invalidRel(name) && handlesFile(name));
 }
 
 function handlesFile(name: string): boolean {
@@ -572,7 +584,7 @@ export function loadProject(input: LoadInput): LoadResult {
   const groupFiles: string[] = [];
   const keys = new Set<string>();
   for (const [name, text] of input.files) {
-    if (name === 'manifest' || name === PROJECT_FILE) {
+    if (isProjectFile(name)) {
       if (projectText !== undefined) throw new LoadRefused('The project has two project files');
       projectText = text;
       continue;

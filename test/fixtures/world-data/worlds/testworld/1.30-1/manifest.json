@@ -26,7 +26,7 @@
   "excluded": { "flags": [32, 64, 128], "count": 1 },
   "counts": { "objects": 5, "roadway": 1005 },
   "places": [
-    { "id": "Village_Testdorf", "type": "Village", "text": "Testdorf", "x": 150, "z": 200 },
+    { "id": "Village_Testville", "type": "Village", "text": "Testville", "x": 150, "z": 200 },
     { "id": "Hill_Testberg", "type": "Hill", "text": "Testberg", "x": 420, "z": 400 }
   ],
   "tiles": [

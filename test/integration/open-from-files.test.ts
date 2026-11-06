@@ -24,12 +24,12 @@ const golden: Record<string, string> = JSON.parse(readFileSync(new URL('../fixtu
 // The files of the golden example G1, as dzStudio saves them: the store's manifest and the Object Spawner file.
 const MANIFEST =
   '{\n    "format": "dzstudio-project",\n    "version": 1,\n    "project": {\n        "groups": [\n            {\n' +
-  '                "file": "objekte.json",\n                "name": "Objekte",\n                "color": "#60A5FA",\n' +
+  '                "file": "objects.json",\n                "name": "Objects",\n                "color": "#60A5FA",\n' +
   '                "hidden": false,\n                "locked": false,\n                "objectCount": 1,\n' +
   '                "objects": [],\n                "plugins": {}\n            }\n        ],\n        "loot": {\n' +
   '            "enabled": false,\n            "hidden": false,\n            "locked": false,\n            "projectId": null,\n' +
   '            "writtenTypes": []\n        },\n        "plugins": {}\n    }\n}\n';
-const OBJEKTE =
+const OBJECTS =
   '{\n    "Objects": [\n        {\n            "name": "StaticFlagPole",\n            "pos": [1234.5679, 150.125, 9876.543],\n' +
   '            "ypr": [46.2, 0.0, 0.0],\n            "scale": 1.0,\n            "enableCEPersistency": 0,\n' +
   '            "customString": "Flag_DayZ"\n        }\n    ]\n}\n';
@@ -74,7 +74,7 @@ describe.skipIf(!referenceServerAvailable)('opening a hosted project without a r
           for (const [f, text] of Object.entries(files)) writeFileSync(join(dir, 'projects', key, f), text);
           writeFileSync(join(dir, 'projects', '.meta', `${key}.json`), JSON.stringify({ projectName: name, map: 'testmap' }));
         };
-        project('basis', 'Basis', { manifest: MANIFEST, 'objekte.json': OBJEKTE, 'mapgroupproto.xml': '<prototype/>' });
+        project('base', 'Base', { manifest: MANIFEST, 'objects.json': OBJECTS, 'mapgroupproto.xml': '<prototype/>' });
         project('baeume', 'Bäume', { 'baeume.json': '{"Objects":[{"name":"DZ\\\\plants\\\\tree\\\\t_betulapendula_3f.p3d"}]}' });
       },
     );
@@ -104,19 +104,19 @@ describe.skipIf(!referenceServerAvailable)('opening a hosted project without a r
 
   it('loads the files, starts the session with the state dzStudio builds, and a person joining gets it', async () => {
     const listed = await call('list_projects');
-    expect(listed.data.projects).toContainEqual({ key: 'basis', name: 'Basis', map: 'testmap', sessionRunning: false, canSave: true });
+    expect(listed.data.projects).toContainEqual({ key: 'base', name: 'Base', map: 'testmap', sessionRunning: false, canSave: true });
 
-    const opened = await call('open_project', { project: 'Basis' });
+    const opened = await call('open_project', { project: 'Base' });
     expect(opened.isError).toBe(false);
-    expect(opened.text).toBe('Opened Basis from its files (1 group, 1 object) and started a session as s1; it is the current session');
-    expect(opened.data).toMatchObject({ project: 'Basis', map: 'testmap', kind: 'hosted', phase: 'waiting for work' });
+    expect(opened.text).toBe('Opened Base from its files (1 group, 1 object) and started a session as s1; it is the current session');
+    expect(opened.data).toMatchObject({ project: 'Base', map: 'testmap', kind: 'hosted', phase: 'waiting for work' });
 
     const anna = await client.request('auth/name', {
       requestId: requestId(),
       name: 'Anna',
       client: { name: 'dzstudio', version: '0.4.0' },
     });
-    const running = (await client.request('sessions/list', { hostedRef: { provider: 'fs', key: 'basis' } }, anna.token)).sessions as Json[];
+    const running = (await client.request('sessions/list', { hostedRef: { provider: 'fs', key: 'base' } }, anna.token)).sessions as Json[];
     expect(running).toHaveLength(1);
     const joined = await client.request(
       'session/join',
@@ -138,11 +138,11 @@ describe.skipIf(!referenceServerAvailable)('opening a hosted project without a r
     const prefix = /"id":"([0-9a-z]{10})-1"/.exec(text)![1]!;
     expect(text.replaceAll(prefix, 'k3f9a0x2mq')).toBe(golden.Z1);
 
-    const made = await call('create_objects', { objects: [{ class: 'WoodenCrate', group: 'Objekte', position: [1240.5, 150, 9880.25] }] });
+    const made = await call('create_objects', { objects: [{ class: 'WoodenCrate', group: 'Objects', position: [1240.5, 150, 9880.25] }] });
     expect(made.text).toMatch(/^Done in one step/);
     expect(made.data.objects[0]).toBe(`${prefix}-4`);
 
-    const again = await call('open_project', { project: 'basis' });
+    const again = await call('open_project', { project: 'base' });
     expect(again.text).toBe('Already in this session as s1');
   }, 60_000);
 
