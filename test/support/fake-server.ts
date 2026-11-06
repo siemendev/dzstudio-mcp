@@ -152,7 +152,7 @@ export class FakeServer implements Transport {
   }
 
   /** Creates a session as a studio (the test's human host) with a snapshot already uploaded. */
-  createSession(opts: { kind?: 'local' | 'hosted'; state: string; host?: string; hostedRef?: Json }): {
+  createSession(opts: { kind?: 'local' | 'hosted'; state: string; host?: string; hostedRef?: Json; map?: string }): {
     sessionId: string;
     participantId: string;
   } {
@@ -161,7 +161,7 @@ export class FakeServer implements Transport {
       id,
       kind: opts.kind ?? 'local',
       projectName: 'Basis',
-      map: 'chernarus',
+      map: opts.map ?? 'chernarus',
       hostedRef: opts.hostedRef,
       log: [],
       snapshots: new Map([[0, [[opts.state]]]]),
