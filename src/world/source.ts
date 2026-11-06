@@ -1,17 +1,20 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cmpRevision, FORMAT, REVISION, sha256 } from './format.js';
 
 export const DEFAULT_BASE = 'https://uploads.dzbot.de/world-data/';
 export const DEFAULT_POINTER = 'https://dzbot.de/api/public/world-data';
 const POINTER_TTL_MS = 5 * 60_000;
+export const DEFAULT_CACHE_LIMIT = 2 * 1024 ** 3;
 
 /** Where world data come from, configured once: a base address (https:// or file://) and, for https, the pointer. */
 export interface WorldDataConfig {
   base?: string;
   pointer?: string;
   cacheDir?: string;
+  /** Most bytes the disk cache may hold; above it the least recently used files go. */
+  cacheLimit?: number;
 }
 
 export interface PointerWorld {
@@ -84,11 +87,16 @@ export class WorldDataSource {
   private readonly fetchFn: FetchFn;
   private pointerAt = 0;
   private pointerValue: Pointer | undefined;
+  readonly cacheLimit: number;
+  /** Cached files below the base (path relative to it, with `/`): size and last use. */
+  private cached: Map<string, { bytes: number; used: number }> | undefined;
+  private inUse: () => Iterable<string> = () => [];
 
   constructor(opts: SourceOptions) {
     const base = slash(opts.base ?? DEFAULT_BASE);
     this.base = base;
     this.fetchFn = opts.fetch ?? fetch;
+    this.cacheLimit = opts.cacheLimit ?? DEFAULT_CACHE_LIMIT;
     if (base.startsWith('file:')) {
       this.local = fileURLToPath(base);
     } else if (/^https?:/.test(base)) {
@@ -170,10 +178,87 @@ export class WorldDataSource {
       return readFileSync(p);
     }
     const p = join(this.cache!, ...rel.split('/'));
-    if (existsSync(p)) return readFileSync(p);
+    if (existsSync(p)) {
+      const bytes = readFileSync(p);
+      this.touch(rel, p, bytes.length);
+      return bytes;
+    }
     const bytes = await this.download(this.base + rel);
     writeAtomic(p, bytes);
+    this.touch(rel, p, bytes.length);
+    this.trim();
     return bytes;
+  }
+
+  /**
+   * Names the revisions that must stay in the cache: a function returning path prefixes below the base, such as
+   * `worlds/chernarusplus/1.30-1/` or `classes/1.30-1/`. Nothing below them is ever evicted.
+   */
+  protect(inUse: () => Iterable<string>): void {
+    this.inUse = inUse;
+  }
+
+  private index(): Map<string, { bytes: number; used: number }> {
+    if (this.cached) return this.cached;
+    const out = new Map<string, { bytes: number; used: number }>();
+    const walk = (dir: string): void => {
+      if (!existsSync(dir)) return;
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, e.name);
+        if (e.isDirectory()) walk(full);
+        else if (e.isFile() && !e.name.endsWith('.tmp')) {
+          const rel = relative(this.cache!, full).split(sep).join('/');
+          if (rel === 'pointer.json') continue;
+          const st = statSync(full);
+          out.set(rel, { bytes: st.size, used: st.mtimeMs });
+        }
+      }
+    };
+    walk(this.cache!);
+    this.cached = out;
+    return out;
+  }
+
+  /** Records a use; the file's modification time carries it across restarts. */
+  private touch(rel: string, path: string, bytes: number): void {
+    const now = Date.now();
+    const idx = this.index();
+    const prev = idx.get(rel);
+    idx.delete(rel);
+    idx.set(rel, { bytes, used: Math.max(now, (prev?.used ?? 0) + 1) });
+    try {
+      utimesSync(path, new Date(now), new Date(now));
+    } catch {
+      // the use still counts for this run
+    }
+  }
+
+  private forget(rel: string): void {
+    rmSync(join(this.cache!, ...rel.split('/')), { force: true });
+    this.cached?.delete(rel);
+  }
+
+  /** Bytes the disk cache holds now. */
+  get cacheBytes(): number {
+    let n = 0;
+    if (this.cache) for (const e of this.index().values()) n += e.bytes;
+    return n;
+  }
+
+  /** Deletes the least recently used files until the cache fits its limit, sparing the revisions in use. */
+  trim(): void {
+    if (!this.cache) return;
+    const idx = this.index();
+    let total = this.cacheBytes;
+    if (total <= this.cacheLimit) return;
+    const keep = [...this.inUse()];
+    const order = [...idx.entries()].sort((a, b) => a[1].used - b[1].used);
+    for (const [rel, e] of order) {
+      if (total <= this.cacheLimit) break;
+      if (keep.some((k) => rel.startsWith(k))) continue;
+      this.forget(rel);
+      total -= e.bytes;
+    }
   }
 
   async json<T>(rel: string): Promise<T> {
@@ -186,10 +271,10 @@ export class WorldDataSource {
     const first = await this.file(rel);
     if (ok(first)) return first;
     if (this.local) throw new DataCorrupt(`map data corrupt: ${rel}`);
-    rmSync(join(this.cache!, ...rel.split('/')), { force: true });
+    this.forget(rel);
     const again = await this.file(rel);
     if (ok(again)) return again;
-    rmSync(join(this.cache!, ...rel.split('/')), { force: true });
+    this.forget(rel);
     throw new DataCorrupt(`map data corrupt: ${rel}`);
   }
 }

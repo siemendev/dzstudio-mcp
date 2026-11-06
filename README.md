@@ -81,6 +81,14 @@ session's map key (e.g. `chernarus`) picks the world; the revision stays the sam
 are "unknown", never zero: a class without data has "box unknown", a map without data gives "No map data for ‹map› —
 project objects only", and a tile that cannot be loaded is named in the answer.
 
+The cache holds at most 2 GB. Above that, the least recently used tiles and rasters are deleted (and downloaded again
+when a question needs them); nothing of a revision that a session the agent is in works on is ever deleted. Another
+limit is set in MB with `worldData.cacheLimitMb` in `config.json` or `DZSTUDIO_MCP_CACHE_LIMIT_MB`:
+
+```json
+{ "worldData": { "cacheLimitMb": 512 } }
+```
+
 ## Tools
 
 | Tool | What it does |
