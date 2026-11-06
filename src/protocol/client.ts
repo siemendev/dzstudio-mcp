@@ -1,5 +1,5 @@
 import { randomToken } from '../scene/ids.js';
-import { ensureOk, PROTOCOL, type Json, type Transport } from './transport.js';
+import { CollabError, ensureOk, PROTOCOL, type Json, type Transport } from './transport.js';
 
 export const CLIENT_NAME = 'dzstudio-mcp';
 export const CLIENT_VERSION = '0.1.0';
@@ -119,6 +119,35 @@ export class CollabClient {
 
   async projectRevision(token: string, hostedRef: Json): Promise<Json> {
     return this.request('project/revision', { hostedRef }, token);
+  }
+
+  /**
+   * project/load: the head, then every file the filter wants, part by part, all from the head's revision. On
+   * `revision_unknown` it starts once more from the head.
+   */
+  async projectLoad(token: string, hostedRef: Json, want: (name: string) => boolean): Promise<{ head: Json; files: Map<string, string> }> {
+    for (let attempt = 0; ; attempt++) {
+      const head = await this.request('project/load', { hostedRef }, token);
+      if (typeof head.sessionId === 'string' || !head.canSave) return { head, files: new Map() };
+      const files = new Map<string, string>();
+      try {
+        for (const f of (Array.isArray(head.files) ? head.files : []) as Json[]) {
+          const name = String(f.name ?? '');
+          if (!want(name)) continue;
+          let text = '';
+          for (let part = 0, parts = 1; part < parts; part++) {
+            const res = await this.request('project/load', { hostedRef, hostedRevision: head.hostedRevision, file: name, part }, token);
+            text += ((res.pieces ?? []) as string[]).join('');
+            parts = Number(res.parts ?? 1);
+          }
+          files.set(name, text);
+        }
+      } catch (e) {
+        if (attempt === 0 && e instanceof CollabError && e.code === 'revision_unknown') continue;
+        throw e;
+      }
+      return { head, files };
+    }
   }
 
   async inviteRedeem(token: string, code: string): Promise<Json> {

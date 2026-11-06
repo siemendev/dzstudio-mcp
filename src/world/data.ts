@@ -83,6 +83,7 @@ export class ClassIndex {
   private readonly byLoose = new Map<string, string>();
   private readonly entries = new Map<string, BoxEntry>();
   private readonly rasters = new Map<string, Promise<Raster | null>>();
+  private asciiLower: Set<string> | undefined;
 
   constructor(
     private readonly source: WorldDataSource,
@@ -115,6 +116,13 @@ export class ClassIndex {
     const e = this.entries.get(c.shape);
     if (!e) return null;
     return { name, flags: c.flags, ...e };
+  }
+
+  /** Whether the game knows a class: its name ignoring the case of ASCII letters, as the editor looks it up. */
+  knows(name: string): boolean {
+    const lower = (t: string): string => t.replace(/[A-Z]/g, (c) => c.toLowerCase());
+    this.asciiLower ??= new Set(Object.keys(this.index.classes).map(lower));
+    return this.asciiLower.has(lower(name));
   }
 
   /** A model by its path, or by its model id. */

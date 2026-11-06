@@ -96,7 +96,9 @@ export function createServer(agent: Agent, world?: WorldTools): McpServer {
   mcp.registerTool(
     'open_project',
     {
-      description: 'Open a project on the server: join its running session. Agents never create projects or save.',
+      description:
+        'Open a project on the server: join its running session, or, when none is running, load its files and start one ' +
+        '(only with the right to save it). Agents never create projects or save.',
       inputSchema: { server, project: z.string().describe('Project key or name') },
     },
     run((a: { server?: string; project: string }) => agent.openProject(a.server, a.project)),
