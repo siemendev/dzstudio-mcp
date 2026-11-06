@@ -118,8 +118,10 @@ npm run typecheck
 npm run format
 ```
 
-The integration test builds the reference server from `../collab-server` (or `DZCOLLAB_SOURCE`), or uses the binary in
-`DZCOLLAB_SERVER`, and runs it on a free port on 127.0.0.1. Without Go and without a binary it is skipped.
+The integration tests build the reference server from `../collab-server` (or `DZCOLLAB_SOURCE`), or use the binary in
+`DZCOLLAB_SERVER`, and run it on a free port on 127.0.0.1. One of them drives the whole agent flow through an MCP
+client: login with a code, joining a person's session, status, a step, review, leaving. Without Go and without a binary
+they are skipped.
 
 The world tools are tested on a tiny world in `test/fixtures/world-data`, made with the reference converter. An opt-in
 test compares every answer with the converter's JavaScript reader on a full converted world: it runs when

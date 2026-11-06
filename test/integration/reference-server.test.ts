@@ -1,69 +1,23 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:net';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { agentClient, CollabClient, requestId } from '../../src/protocol/client.js';
 import { CollabSession } from '../../src/protocol/session.js';
 import { HttpTransport, type Json } from '../../src/protocol/transport.js';
 import { chunk, OpBuilder, readOperation, writeOperation } from '../../src/scene/index.js';
+import { referenceServerAvailable, startReferenceServer, type ReferenceServer } from '../support/reference-server.js';
 
-/**
- * Runs the client against the reference collaboration server. The server binary comes from DZCOLLAB_SERVER, or is
- * built from DZCOLLAB_SOURCE (default: ../collab-server next to this package) when Go is installed. Without either,
- * the test is skipped.
- */
+/** Runs the client against the reference collaboration server (see test/support/reference-server.ts). */
 
 const golden: Record<string, string> = JSON.parse(readFileSync(new URL('../fixtures/golden.json', import.meta.url), 'utf8'));
-const SOURCE = process.env.DZCOLLAB_SOURCE ?? resolve(import.meta.dirname, '../../../collab-server');
 
-function goAvailable(): boolean {
-  try {
-    execFileSync('go', ['version'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-const runnable = !!process.env.DZCOLLAB_SERVER || (goAvailable() && existsSync(join(SOURCE, 'cmd/dzcollab')));
-
-async function portFree(port: number): Promise<boolean> {
-  return new Promise((r) => {
-    const s = createServer();
-    s.once('error', () => r(false));
-    s.listen(port, '127.0.0.1', () => s.close(() => r(true)));
-  });
-}
-
-async function freePort(): Promise<number> {
-  for (let i = 0; i < 200; i++) {
-    const port = 47000 + Math.floor(Math.random() * 1000);
-    if (await portFree(port)) return port;
-  }
-  throw new Error('no free port in 47000–47999');
-}
-
-describe.skipIf(!runnable)('against the reference server', () => {
-  let dir = '';
-  let proc: ChildProcess | undefined;
+describe.skipIf(!referenceServerAvailable)('against the reference server', () => {
+  let server: ReferenceServer | undefined;
   let base = '';
   const raw = (endpoint: string, body: Json): Promise<Json> => new CollabClient(new HttpTransport(base)).request(endpoint, body);
 
   beforeAll(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'dzstudio-mcp-it-'));
-    let binary = process.env.DZCOLLAB_SERVER;
-    if (!binary) {
-      binary = join(dir, 'dzcollab');
-      execFileSync('go', ['build', '-o', binary, './cmd/dzcollab'], { cwd: SOURCE, stdio: 'ignore' });
-    }
-    const port = await freePort();
-    const config = {
+    server = await startReferenceServer({
       server: { name: 'MCP integration' },
-      listen: { host: '127.0.0.1', port, basePath: '/dzcollab/' },
-      dataDir: join(dir, 'data'),
       storage: { type: 'memory' },
       auth: {
         secret: 'integration-secret-integration-secret-01',
@@ -72,25 +26,12 @@ describe.skipIf(!runnable)('against the reference server', () => {
       },
       users: [{ id: 'patrick', name: 'Patrick', password: 'patrick-password' }],
       permissions: { hostLocal: ['*'], localAlwaysJoin: { 'name:Anna': ['patrick'] } },
-    };
-    await writeFile(join(dir, 'config.json'), JSON.stringify(config));
-    proc = spawn(binary, [join(dir, 'config.json')], { stdio: 'ignore' });
-    base = `http://127.0.0.1:${port}/dzcollab/`;
-    for (let i = 0; ; i++) {
-      try {
-        const r = await fetch(base + 'info');
-        if (r.status === 200) break;
-      } catch {
-        // not up yet
-      }
-      if (i > 200) throw new Error('reference server did not start');
-      await new Promise((r) => setTimeout(r, 50));
-    }
+    });
+    base = server.base;
   }, 180_000);
 
   afterAll(async () => {
-    proc?.kill('SIGTERM');
-    if (dir) await rm(dir, { recursive: true, force: true });
+    await server?.stop();
   });
 
   it('logs in with a code, joins a session, sends an operation and reads it back', async () => {
