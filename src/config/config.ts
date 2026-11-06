@@ -28,6 +28,8 @@ export interface WorldDataSettings {
   base?: string;
   /** Pointer to the current revisions; only for a base address. */
   pointer?: string;
+  /** Size limit of the disk cache in MB (default 2048). */
+  cacheLimitMb?: number;
 }
 
 export interface Credential {
@@ -142,14 +144,19 @@ export class ConfigStore {
   }
 
   /** World data settings: `DZSTUDIO_MCP_WORLD_DATA` (and `…_POINTER`) win over config.json, without being stored. */
-  worldData(): WorldDataSettings & { cacheDir: string } {
-    const out: WorldDataSettings & { cacheDir: string } = { ...this.load().worldData, cacheDir: join(this.dir, 'cache') };
+  worldData(): WorldDataSettings & { cacheDir: string; cacheLimit?: number } {
+    const out: WorldDataSettings & { cacheDir: string; cacheLimit?: number } = {
+      ...this.load().worldData,
+      cacheDir: join(this.dir, 'cache'),
+    };
     const base = this.env.DZSTUDIO_MCP_WORLD_DATA;
     if (base) {
       out.base = /^[a-z]+:\/\//.test(base) ? base : pathToFileURL(resolve(base)).href;
       delete out.pointer;
     }
     if (this.env.DZSTUDIO_MCP_WORLD_DATA_POINTER) out.pointer = this.env.DZSTUDIO_MCP_WORLD_DATA_POINTER;
+    const mb = Number(this.env.DZSTUDIO_MCP_CACHE_LIMIT_MB ?? out.cacheLimitMb);
+    if (Number.isFinite(mb) && mb > 0) out.cacheLimit = Math.round(mb * 1024 * 1024);
     return out;
   }
 

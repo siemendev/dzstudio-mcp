@@ -17,6 +17,7 @@ const golden: Record<string, string> = JSON.parse(readFileSync(new URL('../fixtu
 
 describe('world tools through MCP', () => {
   let agent: Agent;
+  let tools: WorldTools;
   let client: Client;
   let ids: string[] = [];
 
@@ -36,7 +37,8 @@ describe('world tools through MCP', () => {
     store.setCredential('fake', { token: 't-agent-Patrick', name: 'Patrick' });
     expect(store.worldData().base!.replace(/\/?$/, '/')).toBe(pathToFileURL(FIXTURE).href);
     agent = new Agent({ store, transport: () => fake, timing: { pollWaitMs: 100, retryDelayMs: 10, confirmTimeoutMs: 2000 } });
-    const mcp = createServer(agent, new WorldTools(agent, new WorldDataSource(store.worldData())));
+    tools = new WorldTools(agent, new WorldDataSource(store.worldData()));
+    const mcp = createServer(agent, tools);
     const [a, b] = InMemoryTransport.createLinkedPair();
     client = new Client({ name: 'test', version: '1' });
     await Promise.all([mcp.connect(a), client.connect(b)]);
@@ -174,5 +176,12 @@ describe('world tools through MCP', () => {
     expect(ground.data.points).toEqual([{ x: 1, z: 2, ground: 'unknown' }]);
     const og = await call('object_ground', { map: 'deerisle', placement: { class: 'WoodenCrate', position: [1, 2, 3] } });
     expect(og.data.objects[0].ground).toBe('unknown');
+  });
+
+  it('keeps the revisions of a session in the disk cache while it is open', async () => {
+    await call('world_info');
+    expect(tools.inUse()).toEqual(['worlds/testworld/1.30-1/', 'classes/1.30-1/']);
+    expect((await call('leave_session')).isError).toBe(false);
+    expect(tools.inUse()).toEqual([]);
   });
 });

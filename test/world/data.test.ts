@@ -1,4 +1,4 @@
-import { cpSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -188,6 +188,39 @@ describe('world data from a base address', () => {
     const wd = await open(offline);
     expect(await wd.objectsIn({ circle: { x: 150, z: 200, radius: 30 } })).toEqual(want);
     expect((await wd.objectsIn({ circle: { x: 400, z: 400, radius: 5 } })).missing).toEqual(['1_1']);
+  });
+
+  it('keeps the disk cache under its limit: least recently used first, across restarts, never a revision in use', async () => {
+    const cache = mkdtempSync(join(tmpdir(), 'wd-cache-'));
+    const tiles = 'worlds/testworld/1.30-1/tiles/';
+    const dir = join(cache, `127.0.0.1_${url.split(':').pop()}_data`, 'worlds', 'testworld', '1.30-1', 'tiles');
+    const present = () => readdirSync(dir).sort();
+    const pause = () => new Promise((r) => setTimeout(r, 20));
+    const limited = (limit: number) =>
+      new WorldDataSource({ base: `${url}/data/`, pointer: `${url}/pointer`, cacheDir: cache, cacheLimit: limit });
+
+    const a = limited(1500);
+    for (const t of ['0_0', '1_0', '0_0', '1_1']) {
+      await a.file(`${tiles}${t}.bin.gz`);
+      await pause();
+    }
+    expect(present()).toEqual(['0_0.bin.gz', '1_1.bin.gz']);
+    expect(a.cacheBytes).toBe(397 + 717);
+
+    const b = limited(1500);
+    await b.file(`${tiles}0_1.bin.gz`);
+    expect(present()).toEqual(['0_1.bin.gz', '1_1.bin.gz']);
+    await pause();
+
+    const c = limited(1000);
+    c.protect(() => [`${tiles}1_1.bin.gz`]);
+    await c.file(`${tiles}0_0.bin.gz`);
+    expect(present()).toEqual(['1_1.bin.gz']);
+
+    const d = limited(1);
+    d.protect(() => ['worlds/testworld/1.30-1/']);
+    await d.file(`${tiles}1_0.bin.gz`);
+    expect(present()).toEqual(['1_0.bin.gz', '1_1.bin.gz']);
   });
 
   it('refuses a pointer in a newer format', async () => {

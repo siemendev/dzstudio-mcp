@@ -71,6 +71,11 @@ describe('config', () => {
       cacheDir: join(dir, 'cache'),
     });
     expect(new ConfigStore(tmp(), {}).worldData().base).toBeUndefined();
+    expect(new ConfigStore(tmp(), {}).worldData().cacheLimit).toBeUndefined();
+    const limited = tmp();
+    writeFileSync(join(limited, 'config.json'), JSON.stringify({ worldData: { cacheLimitMb: 512 } }));
+    expect(new ConfigStore(limited, {}).worldData().cacheLimit).toBe(512 * 1024 * 1024);
+    expect(new ConfigStore(limited, { DZSTUDIO_MCP_CACHE_LIMIT_MB: '100' }).worldData().cacheLimit).toBe(100 * 1024 * 1024);
   });
 
   it('finds the config directory', () => {

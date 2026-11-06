@@ -76,11 +76,22 @@ export class WorldTools {
   private readonly pins = new Map<string, PointerWorld | null>();
   private readonly worlds = new Map<string, Promise<WorldData>>();
   private readonly classIndexes = new Map<string, Promise<ClassIndex>>();
+  /** Per session (server/session id): the revision folders it works on, kept in the disk cache while it is open. */
+  private readonly used = new Map<string, string[]>();
 
   constructor(
     private readonly agent: Agent,
     readonly source: WorldDataSource,
-  ) {}
+  ) {
+    source.protect(() => this.inUse());
+  }
+
+  /** Revision folders of the sessions the agent is in (also one it left while idle and will rejoin). */
+  inUse(): string[] {
+    const open = new Set([...this.agent.sessions.values()].map((r) => `${r.server}/${r.sessionId}`));
+    for (const key of this.used.keys()) if (!open.has(key)) this.used.delete(key);
+    return [...this.used.values()].flat();
+  }
 
   private classIndex(revision: string): Promise<ClassIndex> {
     let p = this.classIndexes.get(revision);
@@ -158,6 +169,7 @@ export class WorldTools {
         ctx.note = `No map data for ${map} — project objects only (${c.note})`;
         return ctx;
       }
+      if (pinKey !== undefined) this.used.set(pinKey, [`worlds/${w.world}/${w.revision}/`, `classes/${c.classes.revision}/`]);
       ctx.wd = await this.worldData(w, c.classes);
     } catch (e) {
       const why = e instanceof DataUnavailable ? e.message : (e as Error).message;
