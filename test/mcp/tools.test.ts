@@ -385,9 +385,9 @@ describe('tools', () => {
     ];
     const r = await h.call('open_project', { project: 'basis nord' });
     expect(r.isError).toBe(false);
-    h.fake.projects = [{ hostedRef: { provider: 'fake', key: 'other' }, projectName: 'Other', map: 'livonia', canSave: true }];
+    h.fake.projects = [{ hostedRef: { provider: 'fake', key: 'other' }, projectName: 'Other', map: 'livonia', canSave: false }];
     expect((await h.call('open_project', { project: 'Other' })).text).toBe(
-      'No session is running for Other. A person has to open it in dzStudio first.',
+      'No session is running for Other, and only someone who may save can start one. Ask a person to open it in dzStudio.',
     );
   });
 

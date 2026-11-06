@@ -84,6 +84,7 @@ export class WorldTools {
     readonly source: WorldDataSource,
   ) {
     source.protect(() => this.inUse());
+    agent.classes = async () => (await this.classesFor((await this.pointer()).pointer)).classes;
   }
 
   /** Revision folders of the sessions the agent is in (also one it left while idle and will rejoin). */

@@ -61,6 +61,20 @@ export interface SessionOptions {
   position?: () => [number, number, number] | undefined;
 }
 
+export interface HostedProject {
+  projectName: string;
+  map: string;
+  hostedRef: Json;
+  hostedRevision: string;
+}
+
+/** `session/create` found a running session of the project; join that one instead. */
+export class AlreadyRunning extends Error {
+  constructor(readonly sessionId: string) {
+    super(`A session of this project is running already: ${sessionId}`);
+  }
+}
+
 export type StepResult =
   | { status: 'applied'; seq: number }
   | { status: 'dropped'; seq: number; message: string }
@@ -177,7 +191,7 @@ export class CollabSession {
 
   private constructor(
     readonly opts: SessionOptions,
-    readonly sessionId: string,
+    public sessionId: string,
     readonly prefix: string,
   ) {
     this.timing = { ...DEFAULT_TIMING, ...opts.timing };
@@ -203,6 +217,69 @@ export class CollabSession {
       }
     }
     throw new Error('Could not find a free session prefix');
+  }
+
+  /**
+   * Creates a session of a hosted project the store has, with the state `build` puts into the (empty) scene as
+   * snapshot 0, then starts polling. Throws AlreadyRunning when a session of the project is running already.
+   */
+  static async createHosted(opts: SessionOptions, params: HostedProject, build: (scene: Scene) => void): Promise<CollabSession> {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const s = new CollabSession(opts, '', randomPrefix());
+      build(s.scene);
+      try {
+        await s.doCreate(params);
+        return s;
+      } catch (e) {
+        if (e instanceof CollabError && e.code === 'instance_key_taken') continue;
+        if (e instanceof CollabError && e.code === 'already_running' && typeof e.error.sessionId === 'string')
+          throw new AlreadyRunning(e.error.sessionId);
+        throw e;
+      }
+    }
+    throw new Error('Could not find a free session prefix');
+  }
+
+  private async doCreate(params: HostedProject): Promise<void> {
+    const text = this.scene.stateText();
+    const parts = groupBytes(chunk(text), PART_BYTES);
+    const body: Json = {
+      requestId: requestId(),
+      client: this.opts.clientInfo,
+      projectName: params.projectName,
+      map: params.map,
+      kind: 'hosted',
+      hostedRef: params.hostedRef,
+      hostedRevision: params.hostedRevision,
+      instanceKey: this.prefix,
+      snapshotBytes: Buffer.byteLength(text, 'utf8'),
+      snapshotParts: parts.length,
+    };
+    const res = await this.withRetry(() => this.client.request('session/create', body, this.opts.token(), this.timing.requestTimeoutMs));
+    this.sessionId = res.sessionId;
+    this.participantId = res.participantId;
+    this.kind = 'hosted';
+    this.role = res.role;
+    this.colour = res.colour;
+    this.rights = { canInvite: !!res.canInvite, canSave: !!res.canSave, canManage: !!res.canManage };
+    this.capabilities = Array.isArray(res.capabilities) ? res.capabilities : [];
+    try {
+      for (let part = 0; part < parts.length; part++) {
+        await this.withRetry(() =>
+          this.client.request(
+            'snapshot/put',
+            { ...this.ids(), seq: 0, part, parts: parts.length, pieces: parts[part] },
+            this.opts.token(),
+            this.timing.requestTimeoutMs,
+          ),
+        );
+      }
+    } catch (e) {
+      await this.client.request('session/leave', this.ids(), this.opts.token()).catch(() => undefined);
+      throw e;
+    }
+    this.state = 'active';
+    this.startPolling();
   }
 
   private async doJoin(): Promise<void> {

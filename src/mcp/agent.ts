@@ -1,10 +1,12 @@
 import type { ConfigStore, Credential, ServerEntry } from '../config/config.js';
 import { agentClient, CollabClient, type ServerInfo } from '../protocol/client.js';
 import {
+  AlreadyRunning,
   CollabSession,
   displayName,
   STATUS_MAX_BYTES,
   type Phase,
+  type SessionOptions,
   type SessionEvent,
   type StepResult,
   type Timing,
@@ -13,6 +15,7 @@ import { CollabError, HttpTransport, UnreachableError, type Json, type Transport
 import { BuildError, normalizeAngle, OpBuilder, type Vec3 } from '../scene/edits.js';
 import { readFloat32, readVec3, writeFloat32, writeVec3 } from '../scene/float32.js';
 import { PROJECT_ID } from '../scene/ids.js';
+import { loadProject, LoadRefused, neededForLoad, type LoadResult } from '../scene/projectload.js';
 import type { Scene } from '../scene/scene.js';
 import type { Element, Operation } from '../scene/textform.js';
 
@@ -23,6 +26,11 @@ const GROUP_COLOURS = ['#60A5FA', '#F87171', '#34D399', '#FBBF24', '#A78BFA', '#
 
 /** A failure the agent should read: the message is the tool result. */
 export class ToolError extends Error {}
+
+/** Classes the game knows, ignoring case (the class data of the world tools). */
+export interface ClassLookup {
+  knows(name: string): boolean;
+}
 
 export interface ToolResult {
   text: string;
@@ -155,6 +163,8 @@ export class Agent {
   private infos = new Map<string, { info: ServerInfo; at: number }>();
   private agentEvents: string[] = [];
   private idleTimer: NodeJS.Timeout;
+  /** The class data, for opening a project from its files; set by the world tools. */
+  classes: (() => Promise<ClassLookup | null>) | undefined;
 
   constructor(readonly opts: AgentOptions) {
     this.idleTimer = setInterval(() => void this.leaveIdle(), 60_000);
@@ -387,17 +397,74 @@ export class Agent {
     const server = this.resolveServer(serverName);
     const info = await this.info(server);
     if (!info.capabilities.includes('hosted')) throw new ToolError(`${server.name} has no projects on the server`);
-    const sessionId = await this.authed(server, async (client, token) => {
+    if (!info.capabilities.includes('agents')) throw new ToolError('Server knows no agents');
+    const found = await this.authed(server, async (client, token) => {
       const { projects } = await client.projectList(token);
       const want = project.toLowerCase();
       const p = projects.find((x) => x.hostedRef?.key === project) ?? projects.find((x) => String(x.projectName).toLowerCase() === want);
       if (!p) throw new ToolError(`No project ${project} on ${server.name}`);
-      if (typeof p.sessionId === 'string') return p.sessionId;
+      if (typeof p.sessionId === 'string') return { sessionId: p.sessionId as string };
       const running = await client.sessionsList(token, p.hostedRef);
-      if (running[0]) return running[0].sessionId as string;
-      throw new ToolError(`No session is running for ${p.projectName}. A person has to open it in dzStudio first.`);
+      if (running[0]) return { sessionId: running[0].sessionId as string };
+      return { project: p };
     });
-    return this.joinSession(server.name, sessionId);
+    if (found.sessionId) return this.joinSession(server.name, found.sessionId);
+    return this.openFromFiles(server, found.project!);
+  }
+
+  /** No session is running: load the files, build the state as dzStudio does, and start a session with it. */
+  private async openFromFiles(server: ServerEntry, p: Json): Promise<ToolResult> {
+    const notSaver = `No session is running for ${p.projectName}, and only someone who may save can start one. Ask a person to open it in dzStudio.`;
+    if (!p.canSave) throw new ToolError(notSaver);
+    const { head, files } = await this.authed(server, (client, token) => client.projectLoad(token, p.hostedRef, neededForLoad)).catch(
+      (e) => {
+        if (e instanceof CollabError) throw new ToolError(`Cannot open ${p.projectName}: ${e.message}`);
+        throw e;
+      },
+    );
+    if (typeof head.sessionId === 'string') return this.joinSession(server.name, head.sessionId);
+    if (!head.canSave) throw new ToolError(notSaver);
+    const lookup = this.classes ? await this.classes().catch(() => null) : null;
+    const rec: SessionRecord = {
+      handle: `s${this.nextHandle++}`,
+      server: server.name,
+      sessionId: '',
+      projectName: String(head.projectName ?? p.projectName ?? ''),
+      map: String(head.map ?? p.map ?? ''),
+      collab: undefined,
+      idleLeft: false,
+      lastWorkMs: Date.now(),
+    };
+    const by = this.author(rec);
+    let loaded: LoadResult | undefined;
+    const build = (scene: Scene): void => {
+      loaded = loadProject({ files, ids: scene.ids, ...by, ...(lookup ? { classKnown: (n: string) => lookup.knows(n) } : {}) });
+      const res = scene.apply(loaded.op);
+      if (res.result !== 'applied') throw new LoadRefused(`The project's state does not open (${res.result})`);
+    };
+    const cred = this.credential(server);
+    try {
+      rec.collab = await CollabSession.createHosted(
+        this.sessionOptions(server, rec, cred),
+        { projectName: rec.projectName, map: rec.map, hostedRef: p.hostedRef, hostedRevision: String(head.hostedRevision ?? '') },
+        build,
+      );
+    } catch (e) {
+      if (e instanceof LoadRefused) throw new ToolError(`Cannot open ${rec.projectName} from its files: ${e.message}`);
+      if (e instanceof AlreadyRunning) return this.joinSession(server.name, e.sessionId);
+      this.joinError(server, e);
+    }
+    rec.sessionId = rec.collab.sessionId;
+    this.sessions.set(rec.handle, rec);
+    this.current = rec.handle;
+    const notes = loaded!.notes;
+    return {
+      text:
+        `Opened ${rec.projectName} from its files (${plural(loaded!.groups, 'group')}, ${plural(loaded!.objects, 'object')}) ` +
+        `and started a session as ${rec.handle}; it is the current session` +
+        (notes.length ? `. On opening: ${notes.join('; ')}` : ''),
+      data: this.sessionRow(rec),
+    };
   }
 
   async joinSession(serverName: string | undefined, sessionId?: string, code?: string): Promise<ToolResult> {
@@ -444,28 +511,36 @@ export class Agent {
     return { text: `Joined ${rec.projectName || target} as ${handle}; it is the current session`, data: this.sessionRow(rec) };
   }
 
+  private sessionOptions(server: ServerEntry, rec: SessionRecord, cred: Credential): SessionOptions {
+    return {
+      client: this.client(server),
+      token: () => this.store.credential(server.name)?.token ?? cred.token,
+      clientInfo: agentClient(this.store.load().agentName),
+      position: () => this.position(rec),
+      ...(this.opts.timing ? { timing: this.opts.timing } : {}),
+    };
+  }
+
+  /** Turns an error of joining or creating into the message for the agent. */
+  private joinError(server: ServerEntry, e: unknown): never {
+    if (e instanceof CollabError) {
+      if (['token_invalid', 'token_expired', 'auth_required'].includes(e.code)) {
+        this.store.setCredential(server.name, undefined);
+        throw new ToolError(`Not signed in to ${server.name} — call login`);
+      }
+      if (e.code === 'session_unknown' || e.code === 'session_ended') throw new ToolError('This session is already over');
+      if (e.code === 'session_full') throw new ToolError('Session is full');
+      throw new ToolError(`Cannot join: ${e.error.message ?? e.code}`);
+    }
+    if (e instanceof UnreachableError) throw new ToolError('Server not reachable');
+    throw e;
+  }
+
   private async connect(server: ServerEntry, rec: SessionRecord, cred: Credential): Promise<CollabSession> {
     try {
-      const opts = {
-        client: this.client(server),
-        token: () => this.store.credential(server.name)?.token ?? cred.token,
-        clientInfo: agentClient(this.store.load().agentName),
-        position: () => this.position(rec),
-        ...(this.opts.timing ? { timing: this.opts.timing } : {}),
-      };
-      return await CollabSession.join(opts, rec.sessionId);
+      return await CollabSession.join(this.sessionOptions(server, rec, cred), rec.sessionId);
     } catch (e) {
-      if (e instanceof CollabError) {
-        if (['token_invalid', 'token_expired', 'auth_required'].includes(e.code)) {
-          this.store.setCredential(server.name, undefined);
-          throw new ToolError(`Not signed in to ${server.name} — call login`);
-        }
-        if (e.code === 'session_unknown' || e.code === 'session_ended') throw new ToolError('This session is already over');
-        if (e.code === 'session_full') throw new ToolError('Session is full');
-        throw new ToolError(`Cannot join: ${e.error.message ?? e.code}`);
-      }
-      if (e instanceof UnreachableError) throw new ToolError('Server not reachable');
-      throw e;
+      this.joinError(server, e);
     }
   }
 
