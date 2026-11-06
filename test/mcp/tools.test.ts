@@ -5,7 +5,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ConfigStore } from '../../src/config/config.js';
-import { Agent } from '../../src/mcp/agent.js';
+import { Agent, IDLE_LEAVE_MS } from '../../src/mcp/agent.js';
 import { createServer } from '../../src/mcp/server.js';
 import { IdAllocator, OpBuilder, readOperation, Scene, writeOperation } from '../../src/scene/index.js';
 import { FakeServer } from '../support/fake-server.js';
@@ -369,6 +369,32 @@ describe('tools', () => {
     expect(r.isError).toBe(false);
     expect(r.text).toContain('Joined again after leaving while idle');
     expect(h.fake.count('session/join')).toBe(2);
+  });
+
+  it('waits 30 minutes without work by default before leaving', async () => {
+    expect(IDLE_LEAVE_MS).toBe(30 * 60_000);
+    const h = await harness({ idleLeaveMs: 60_000 });
+    await joined(h);
+    await h.agent.checkIdle();
+    expect(h.fake.count('session/leave')).toBe(0);
+  });
+
+  it('does not leave while working or waiting for review, and leaves once a person saved the reviewed work', async () => {
+    const h = await harness({ idleLeaveMs: 0 });
+    const host = await joined(h, 'hosted');
+    await h.call('set_status', { phase: 'working', status: 'thinking for a long time' });
+    await h.agent.checkIdle();
+    expect(h.fake.count('session/leave')).toBe(0);
+    await h.call('create_objects', { objects: [{ class: 'B', group: GROUP, position: [0, 0, 0] }] });
+    await h.call('request_review', { status: 'one crate' });
+    await h.agent.checkIdle();
+    expect(h.fake.count('session/leave')).toBe(0);
+    h.fake.save(host.sessionId, 'Anna');
+    const saved = await h.call('session_events', { wait_seconds: 3 });
+    expect(saved.text).toContain('Saved by Anna');
+    expect((await h.call('session_info')).data.phase).toBe('waiting for work');
+    await h.agent.checkIdle();
+    expect(h.fake.count('session/leave')).toBe(1);
   });
 
   it('opens a project by name through its running session', async () => {
