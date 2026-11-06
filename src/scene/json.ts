@@ -70,7 +70,13 @@ export function writeInt(n: number): string {
 
 /** A string → string map with byte-sorted keys. */
 export function writeStringMap(m: ReadonlyMap<string, string>): string {
-  return '{' + sortedKeys(m.keys()).map((k) => writeString(k) + ':' + writeString(m.get(k)!)).join(',') + '}';
+  return (
+    '{' +
+    sortedKeys(m.keys())
+      .map((k) => writeString(k) + ':' + writeString(m.get(k)!))
+      .join(',') +
+    '}'
+  );
 }
 
 /** Generic writer for plugin-owned JSON (objects with byte-sorted keys). */
@@ -83,7 +89,13 @@ export function writeJson(v: JsonValue): string {
   }
   if (typeof v === 'string') return writeString(v);
   if (Array.isArray(v)) return '[' + v.map(writeJson).join(',') + ']';
-  return '{' + sortedKeys(v.keys()).map((k) => writeString(k) + ':' + writeJson(v.get(k)!)).join(',') + '}';
+  return (
+    '{' +
+    sortedKeys(v.keys())
+      .map((k) => writeString(k) + ':' + writeJson(v.get(k)!))
+      .join(',') +
+    '}'
+  );
 }
 
 export function parseJson(text: string): JsonValue {

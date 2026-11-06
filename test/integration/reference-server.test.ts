@@ -113,7 +113,14 @@ describe.skipIf(!runnable)('against the reference server', () => {
     });
     const annaIds = { sessionId: created.sessionId, participantId: created.participantId };
     await raw('snapshot/put', { token: anna.token, ...annaIds, seq: 0, part: 0, parts: 1, pieces: chunk(golden.Z1!) });
-    await raw('poll', { token: anna.token, ...annaIds, after: 0, waitMs: 0, versions: {}, presence: { idleSeconds: 0, position: [0.0, 0.0, 0.0] } });
+    await raw('poll', {
+      token: anna.token,
+      ...annaIds,
+      after: 0,
+      waitMs: 0,
+      versions: {},
+      presence: { idleSeconds: 0, position: [0.0, 0.0, 0.0] },
+    });
 
     const start = await client.codeStart(agentClient('Scout'));
     const form = new URLSearchParams({ code: start.loginCode, user: 'patrick', password: 'patrick-password', action: 'confirm' });
@@ -142,7 +149,14 @@ describe.skipIf(!runnable)('against the reference server', () => {
       expect(await s.submit(op)).toEqual({ status: 'applied', seq: 1 });
       expect(s.scene.has(crate)).toBe(true);
 
-      const seen = await raw('poll', { token: anna.token, ...annaIds, after: 0, waitMs: 0, versions: {}, presence: { idleSeconds: 0, position: [0.0, 0.0, 0.0] } });
+      const seen = await raw('poll', {
+        token: anna.token,
+        ...annaIds,
+        after: 0,
+        waitMs: 0,
+        versions: {},
+        presence: { idleSeconds: 0, position: [0.0, 0.0, 0.0] },
+      });
       expect(seen.ops).toHaveLength(1);
       expect(seen.ops[0].pieces.join('')).toBe(writeOperation(op));
       const agentRow = seen.participants.list.find((p: Json) => p.participantId === s.participantId);

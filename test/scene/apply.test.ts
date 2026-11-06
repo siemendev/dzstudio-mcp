@@ -1,6 +1,16 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { IdAllocator, inverseChange, OpBuilder, readOperation, Scene, writeChange, writeOperation, type Change, type Operation } from '../../src/scene/index.js';
+import {
+  IdAllocator,
+  inverseChange,
+  OpBuilder,
+  readOperation,
+  Scene,
+  writeChange,
+  writeOperation,
+  type Change,
+  type Operation,
+} from '../../src/scene/index.js';
 
 const golden: Record<string, string> = JSON.parse(readFileSync(new URL('../fixtures/golden.json', import.meta.url), 'utf8'));
 const BY = { author: 'z9y8x7w6v5u4t3s2', authorName: 'Tester' };
@@ -36,16 +46,28 @@ describe('preconditions', () => {
     const before = s.stateText();
     expect(s.apply(op([{ k: 'create', el: objectEl(FLAG) }]))).toMatchObject({ result: 'precondition', failure: 'exists' });
     expect(s.apply(op([{ k: 'create', el: objectEl('', '') }]))).toMatchObject({ result: 'precondition', failure: 'exists' });
-    expect(s.apply(op([{ k: 'create', el: objectEl('q8w7e6r5t4-1', '', 'nope') }]))).toMatchObject({ failure: 'missing', message: 'Object was deleted' });
-    expect(s.apply(op([{ k: 'create', el: objectEl('q8w7e6r5t4-1', '', 'project') }]))).toMatchObject({ failure: 'invalid', message: 'Change no longer fits' });
-    expect(s.apply(op([{ k: 'create', el: { ...objectEl('project'), kind: 'core:project', parent: '' } }]))).toMatchObject({ failure: 'exists' });
+    expect(s.apply(op([{ k: 'create', el: objectEl('q8w7e6r5t4-1', '', 'nope') }]))).toMatchObject({
+      failure: 'missing',
+      message: 'Object was deleted',
+    });
+    expect(s.apply(op([{ k: 'create', el: objectEl('q8w7e6r5t4-1', '', 'project') }]))).toMatchObject({
+      failure: 'invalid',
+      message: 'Change no longer fits',
+    });
+    expect(s.apply(op([{ k: 'create', el: { ...objectEl('project'), kind: 'core:project', parent: '' } }]))).toMatchObject({
+      failure: 'exists',
+    });
     expect(s.stateText()).toBe(before);
   });
 
   it('create with parent "" only for the project on an empty state', () => {
     const s = new Scene();
-    expect(s.apply(op([{ k: 'create', el: { ...objectEl('x'), kind: 'core:project', parent: '' } }]))).toMatchObject({ failure: 'invalid' });
-    expect(s.apply(op([{ k: 'create', el: { ...objectEl('project'), kind: 'core:group', parent: '' } }]))).toMatchObject({ failure: 'invalid' });
+    expect(s.apply(op([{ k: 'create', el: { ...objectEl('x'), kind: 'core:project', parent: '' } }]))).toMatchObject({
+      failure: 'invalid',
+    });
+    expect(s.apply(op([{ k: 'create', el: { ...objectEl('project'), kind: 'core:group', parent: '' } }]))).toMatchObject({
+      failure: 'invalid',
+    });
     expect(s.apply(op([{ k: 'create', el: { ...objectEl('project'), kind: 'core:project', parent: '' } }]))).toEqual({ result: 'applied' });
   });
 
@@ -54,7 +76,10 @@ describe('preconditions', () => {
     const b = new OpBuilder(s, 'projects:edit', BY);
     b.deleteTree(GROUP);
     expect(s.apply(b.finish())).toEqual({ result: 'applied' });
-    expect(s.apply(op([{ k: 'create', el: objectEl('q8w7e6r5t4-50') }]))).toMatchObject({ failure: 'missing', message: 'Group was deleted' });
+    expect(s.apply(op([{ k: 'create', el: objectEl('q8w7e6r5t4-50') }]))).toMatchObject({
+      failure: 'missing',
+      message: 'Group was deleted',
+    });
   });
 
   it('delete: missing, has children, any difference is changed', () => {
@@ -79,7 +104,9 @@ describe('preconditions', () => {
     const s = z1();
     expect(s.apply(op([{ k: 'field', id: FLAG, key: 'nope', old: '', new: 'x' }]))).toMatchObject({ failure: 'changed' });
     expect(s.apply(op([{ k: 'field', id: FLAG, key: 'customString', new: 'x' }]))).toMatchObject({ failure: 'changed' });
-    expect(s.apply(op([{ k: 'field', id: 'nope', key: 'customString', old: 'Flag_DayZ', new: 'x' }]))).toMatchObject({ failure: 'missing' });
+    expect(s.apply(op([{ k: 'field', id: 'nope', key: 'customString', old: 'Flag_DayZ', new: 'x' }]))).toMatchObject({
+      failure: 'missing',
+    });
     expect(s.apply(op([{ k: 'field', id: FLAG, key: 'nope', new: '' }], 'q8w7e6r5t4-901'))).toEqual({ result: 'applied' });
     expect(s.get(FLAG)!.fields.get('nope')).toBe('');
     expect(s.apply(op([{ k: 'field', id: FLAG, key: 'nope', old: '' }], 'q8w7e6r5t4-902'))).toEqual({ result: 'applied' });
@@ -107,9 +134,15 @@ describe('preconditions', () => {
     const g2 = b.createGroup({ name: 'Two', color: '#FF0000', file: 'two.json' });
     expect(s.apply(b.finish())).toEqual({ result: 'applied' });
     expect(s.apply(op([{ k: 'move', id: FLAG, from: g2, fromAfter: '', to: g2, toAfter: '' }]))).toMatchObject({ failure: 'changed' });
-    expect(s.apply(op([{ k: 'move', id: FLAG, from: GROUP, fromAfter: '', to: 'nope', toAfter: '' }]))).toMatchObject({ failure: 'missing' });
-    expect(s.apply(op([{ k: 'move', id: FLAG, from: GROUP, fromAfter: '', to: 'project', toAfter: '' }]))).toMatchObject({ failure: 'invalid' });
-    expect(s.apply(op([{ k: 'move', id: GROUP, from: 'project', fromAfter: '', to: GROUP, toAfter: '' }]))).toMatchObject({ failure: 'invalid' });
+    expect(s.apply(op([{ k: 'move', id: FLAG, from: GROUP, fromAfter: '', to: 'nope', toAfter: '' }]))).toMatchObject({
+      failure: 'missing',
+    });
+    expect(s.apply(op([{ k: 'move', id: FLAG, from: GROUP, fromAfter: '', to: 'project', toAfter: '' }]))).toMatchObject({
+      failure: 'invalid',
+    });
+    expect(s.apply(op([{ k: 'move', id: GROUP, from: 'project', fromAfter: '', to: GROUP, toAfter: '' }]))).toMatchObject({
+      failure: 'invalid',
+    });
     expect(s.apply(op([{ k: 'move', id: FLAG, from: GROUP, fromAfter: '', to: g2, toAfter: '' }]))).toEqual({ result: 'applied' });
     expect(s.get(FLAG)!.parent).toBe(g2);
     expect(s.childCount(GROUP)).toBe(0);
@@ -132,7 +165,16 @@ describe('position among siblings', () => {
     s.apply(op([{ k: 'create', el: objectEl('q8w7e6r5t4-101', '') }], 'q8w7e6r5t4-201'));
     s.apply(op([{ k: 'create', el: objectEl('q8w7e6r5t4-102', 'gone') }], 'q8w7e6r5t4-202'));
     s.apply(op([{ k: 'create', el: objectEl('q8w7e6r5t4-103', 'project') }], 'q8w7e6r5t4-203'));
-    expect(s.children(GROUP)).toEqual(['q8w7e6r5t4-101', ids[0], ids[1], 'q8w7e6r5t4-100', ids[2], ids[3], 'q8w7e6r5t4-102', 'q8w7e6r5t4-103']);
+    expect(s.children(GROUP)).toEqual([
+      'q8w7e6r5t4-101',
+      ids[0],
+      ids[1],
+      'q8w7e6r5t4-100',
+      ids[2],
+      ids[3],
+      'q8w7e6r5t4-102',
+      'q8w7e6r5t4-103',
+    ]);
   });
 
   it('move with toAfter = own id goes to the end; the inverse puts it back', () => {
@@ -238,7 +280,11 @@ describe('stages', () => {
 
   it('a create of an unknown element type is an unknown type of its plugin', () => {
     const s = z1();
-    expect(s.apply(op([{ k: 'create', el: { ...objectEl('q8w7e6r5t4-5'), kind: 'roads:segment' } }]))).toEqual({ result: 'unknown_type', plugin: 'roads', version: 1 });
+    expect(s.apply(op([{ k: 'create', el: { ...objectEl('q8w7e6r5t4-5'), kind: 'roads:segment' } }]))).toEqual({
+      result: 'unknown_type',
+      plugin: 'roads',
+      version: 1,
+    });
   });
 
   it('an operation without changes is applied and its id is known', () => {

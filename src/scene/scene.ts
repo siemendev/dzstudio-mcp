@@ -256,7 +256,12 @@ export class Scene {
           } catch (e) {
             if (!(e instanceof PreconditionFailed)) throw e;
             this.rollback(undo);
-            failed = { result: 'precondition', failure: e.failure, index: i, message: stepMessage(e.failure, this.kindsSeen.get(e.addressed)) };
+            failed = {
+              result: 'precondition',
+              failure: e.failure,
+              index: i,
+              message: stepMessage(e.failure, this.kindsSeen.get(e.addressed)),
+            };
           }
         }
         if (failed) results.push(failed);
