@@ -1,5 +1,8 @@
 # dzstudio-mcp
 
+[![CI](https://github.com/siemendev/dzstudio-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/siemendev/dzstudio-mcp/actions/workflows/test.yml)
+[![npm](https://img.shields.io/npm/v/@dzbot/dzstudio-mcp)](https://www.npmjs.com/package/@dzbot/dzstudio-mcp)
+
 An MCP server that lets an AI agent build in **dzStudio**, the in-game object editor for DayZ, together with people.
 The agent joins a dzStudio collaboration session as a participant without the game: it speaks the open collaboration
 protocol **dzcollab 1** (see `PROTOCOL.md` of the dzStudio collaboration server), keeps the project state on your

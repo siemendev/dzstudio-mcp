@@ -1,17 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import {
-  chunk,
-  IdAllocator,
-  parseJson,
-  readFloat32,
-  readVec3,
-  Scene,
-  utf8Bytes,
-  writeFloat32,
-  writeString,
-  writeVec3,
-} from '../../src/scene/index.js';
+import { chunk, parseJson, readFloat32, readVec3, Scene, utf8Bytes, writeFloat32, writeString, writeVec3 } from '../../src/scene/index.js';
 
 const golden: Record<string, string> = JSON.parse(readFileSync(new URL('../fixtures/golden.json', import.meta.url), 'utf8'));
 

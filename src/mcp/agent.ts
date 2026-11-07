@@ -131,7 +131,7 @@ function plural(n: number, word: string): string {
 }
 
 function validateStatus(status: string): void {
-  if (/[\r\n]/.test(status) || /[\u0000-\u001f\u007f]/.test(status)) throw new ToolError('Status must be one line');
+  if ([...status].some((c) => c < ' ' || c === '\x7f')) throw new ToolError('Status must be one line');
   if (Buffer.byteLength(status, 'utf8') > STATUS_MAX_BYTES) throw new ToolError('Status too long (at most 200 bytes)');
 }
 

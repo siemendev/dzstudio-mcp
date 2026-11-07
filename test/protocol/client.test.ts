@@ -1,6 +1,6 @@
 import { createServer, type Server } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { agentClient, CollabClient } from '../../src/protocol/client.js';
+import { agentClient, CLIENT_VERSION, CollabClient } from '../../src/protocol/client.js';
 import { CollabError, HttpTransport, parseResponse, UnreachableError } from '../../src/protocol/transport.js';
 import { FakeServer } from '../support/fake-server.js';
 
@@ -65,7 +65,7 @@ describe('client', () => {
     const c = new CollabClient(fake);
     const start = await c.codeStart(agentClient('Scout'));
     expect(start).toMatchObject({ loginCode: 'ABCD0001', intervalSeconds: 2 });
-    expect(fake.requests[0]!.body.client).toEqual({ name: 'dzstudio-mcp', version: '0.1.0', kind: 'agent', agentName: 'Scout' });
+    expect(fake.requests[0]!.body.client).toEqual({ name: 'dzstudio-mcp', version: CLIENT_VERSION, kind: 'agent', agentName: 'Scout' });
     expect(await c.codePoll(start.loginCode)).toEqual({ state: 'waiting' });
     fake.codeLogins.set(start.loginCode, { state: 'confirmed', name: 'Patrick' });
     expect(await c.codePoll(start.loginCode)).toEqual({ state: 'confirmed', token: 't-agent-Patrick', name: 'Patrick' });

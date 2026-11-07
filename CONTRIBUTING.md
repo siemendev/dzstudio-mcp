@@ -10,7 +10,8 @@ Issues and pull requests are welcome. Questions are also welcome in
   `test/scene` byte-exact. Protocol behaviour follows
   [PROTOCOL.md](https://github.com/siemendev/dzstudio-collab-server/blob/main/PROTOCOL.md) — name the section a change
   implements.
-- Run `npm run typecheck`, `npm run format:check` and `npm test` and say that they passed. The integration tests start
+- Run `npm run typecheck`, `npm run lint`, `npm run format:check` and `npm test` and say that they passed (CI runs
+  them too). The integration tests start
   the reference server from a checkout of
   [dzstudio-collab-server](https://github.com/siemendev/dzstudio-collab-server) (set `DZCOLLAB_SOURCE`, needs Go);
   without it they are skipped.
