@@ -14,6 +14,7 @@ Issues and pull requests are welcome. Questions are also welcome in
   the reference server from a checkout of
   [dzstudio-collab-server](https://github.com/siemendev/dzstudio-collab-server) (set `DZCOLLAB_SOURCE`, needs Go);
   without it they are skipped.
+- A version raised in `package.json` is published to npm and tagged when it reaches `main`.
 
 ## Sign-off (DCO)
 

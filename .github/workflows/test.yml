@@ -26,3 +26,28 @@ jobs:
       - run: npm test
         env:
           DZCOLLAB_SOURCE: ${{ github.workspace }}/collab-server
+  publish:
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # A version already on npm is skipped, so only a raised version in package.json publishes
+      - name: Publish a new version to npm and tag it
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ -n "$(npm view "@dzbot/dzstudio-mcp@$version" version 2>/dev/null)" ]; then
+            echo "@dzbot/dzstudio-mcp@$version is already on npm"
+            exit 0
+          fi
+          npm ci
+          npm publish --access public --provenance
+          git tag "v$version"
+          git push origin "v$version"
