@@ -6,6 +6,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ConfigStore } from '../../src/config/config.js';
 import { Agent, IDLE_LEAVE_MS } from '../../src/mcp/agent.js';
+import { CLIENT_VERSION } from '../../src/protocol/client.js';
 import { createServer } from '../../src/mcp/server.js';
 import { IdAllocator, OpBuilder, readOperation, Scene, writeOperation } from '../../src/scene/index.js';
 import { FakeServer } from '../support/fake-server.js';
@@ -148,7 +149,7 @@ describe('tools', () => {
     const h = await harness({ signedIn: false, agentName: 'Scout' });
     await h.call('login');
     const start = h.fake.requests.find((r) => r.endpoint === 'auth/code/start');
-    expect(start?.body.client).toEqual({ name: 'dzstudio-mcp', version: '0.1.0', kind: 'agent', agentName: 'Scout' });
+    expect(start?.body.client).toEqual({ name: 'dzstudio-mcp', version: CLIENT_VERSION, kind: 'agent', agentName: 'Scout' });
   });
 
   it('reports a denied login', async () => {

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
-import { agentClient, CollabClient } from '../../src/protocol/client.js';
+import { agentClient, CLIENT_VERSION, CollabClient } from '../../src/protocol/client.js';
 import { CollabSession, type SessionOptions } from '../../src/protocol/session.js';
 import { OpBuilder, readOperation, writeOperation } from '../../src/scene/index.js';
 import { FakeServer } from '../support/fake-server.js';
@@ -52,7 +52,7 @@ describe('session', () => {
     const { server, s } = await setup();
     expect(s.scene.stateText()).toBe(golden.Z1);
     const join = server.requests.find((r) => r.endpoint === 'session/join')!;
-    expect(join.body.client).toEqual({ name: 'dzstudio-mcp', version: '0.1.0', kind: 'agent', agentName: 'Scout' });
+    expect(join.body.client).toEqual({ name: 'dzstudio-mcp', version: CLIENT_VERSION, kind: 'agent', agentName: 'Scout' });
     expect(join.body.instanceKey).toBe(s.prefix);
     expect(join.body.protocol).toBe('1.0');
   });

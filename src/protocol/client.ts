@@ -1,8 +1,9 @@
+import { createRequire } from 'node:module';
 import { randomToken } from '../scene/ids.js';
 import { CollabError, ensureOk, PROTOCOL, type Json, type Transport } from './transport.js';
 
 export const CLIENT_NAME = 'dzstudio-mcp';
-export const CLIENT_VERSION = '0.1.0';
+export const CLIENT_VERSION: string = (createRequire(import.meta.url)('../../package.json') as { version: string }).version;
 
 export interface ClientInfo {
   name: string;

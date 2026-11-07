@@ -1,0 +1,11 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":dependencyDashboard", ":semanticCommitsDisabled", "helpers:pinGitHubActionDigestsToSemver"],
+  "schedule": ["before 6am on monday"],
+  "timezone": "Europe/Berlin",
+  "lockFileMaintenance": { "enabled": true, "schedule": ["before 6am on the first day of the month"] },
+  "packageRules": [
+    { "matchUpdateTypes": ["minor", "patch", "pin", "digest"], "groupName": "all non-major dependencies", "groupSlug": "all-minor-patch" }
+  ],
+  "vulnerabilityAlerts": { "enabled": true, "schedule": ["at any time"] }
+}
