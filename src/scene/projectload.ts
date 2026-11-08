@@ -3,6 +3,10 @@
  * session is running yet: the project file (the store's `manifest`), then every group file in the Object Spawner
  * format, all as one `core:load` operation. The result is the same state a dzStudio would upload as snapshot 0.
  *
+ * A project file of version 2 holds the whole project: its `spawnerGroup` blocks become the group files dzStudio
+ * writes into its working folder (`dzstudio/<slug>/<block id>.json`), its `editor` part the project part of
+ * version 1; other files of the store are left out, as dzStudio does.
+ *
  * Where the editor's result depends on the running game and not on the files alone — a model path (the game places
  * the model to learn its origin) or loot that is turned on (it reads the loot files and the vanilla baseline) — the
  * project is refused instead of opened differently.
@@ -17,7 +21,7 @@ import type { Change, Comp, Element, Operation } from './textform.js';
 
 export const PROJECT_FILE = 'project.dzstudio.json';
 const LEGACY_PROJECT_FILE = 'projekt.dzstudio.json';
-const PROJECT_FILE_VERSION = 1;
+const PROJECT_FILE_VERSION = 2;
 const PALETTE = ['#60A5FA', '#FB923C', '#2DD4BF', '#F472B6', '#A3E635', '#FDE047', '#94A3B8', '#E879F9'];
 const KNOWN_ENTRY_KEYS = ['name', 'pos', 'ypr', 'scale', 'enableCEPersistency', 'customString'];
 
@@ -320,6 +324,205 @@ function readProjectFile(text: string | undefined, notes: string[]): PFData {
   return emptyPF();
 }
 
+// ---------------------------------------------------------------- version 2: building blocks and the editor part
+
+/** A JSON value as dzStudio's DZS_Json holds it: numbers as their text, the last of duplicate keys in the first place. */
+type JV =
+  | { t: 'obj'; m: Map<string, JV> }
+  | { t: 'arr'; a: JV[] }
+  | { t: 'num'; s: string }
+  | { t: 'str'; s: string }
+  | { t: 'bool'; b: boolean }
+  | { t: 'null' };
+
+function toJV(n: SrcNode): JV {
+  switch (n.type) {
+    case 'obj': {
+      const m = new Map<string, JV>();
+      n.keys.forEach((k, i) => m.set(k, toJV(n.items[i]!)));
+      return { t: 'obj', m };
+    }
+    case 'arr':
+      return { t: 'arr', a: n.items.map(toJV) };
+    case 'num':
+      return { t: 'num', s: n.str };
+    case 'str':
+      return { t: 'str', s: n.str };
+    case 'bool':
+      return { t: 'bool', b: n.bool };
+    default:
+      return { t: 'null' };
+  }
+}
+
+const jStr = (s: string): JV => ({ t: 'str', s });
+const jBool = (b: boolean): JV => ({ t: 'bool', b });
+const jObj = (): { t: 'obj'; m: Map<string, JV> } => ({ t: 'obj', m: new Map() });
+
+function getStr(v: JV | undefined, key: string): string {
+  if (v?.t !== 'obj') return '';
+  const x = v.m.get(key);
+  return x?.t === 'str' ? x.s : '';
+}
+
+/** dzStudio's text form (DZS_TextForm.Value): 4 spaces per level, one field per line, empty {} and [] inline. */
+function textForm(v: JV, depth: number): string {
+  const ind = (d: number): string => '    '.repeat(d);
+  if (v.t === 'arr') {
+    if (!v.a.length) return '[]';
+    return `[\n${v.a.map((x) => ind(depth + 1) + textForm(x, depth + 1)).join(',\n')}\n${ind(depth)}]`;
+  }
+  if (v.t === 'obj') {
+    if (!v.m.size) return '{}';
+    const lines = [...v.m].map(([k, x]) => `${ind(depth + 1)}${writeString(k)}: ${textForm(x, depth + 1)}`);
+    return `{\n${lines.join(',\n')}\n${ind(depth)}}`;
+  }
+  if (v.t === 'num') return v.s;
+  if (v.t === 'str') return writeString(v.s);
+  if (v.t === 'bool') return String(v.b);
+  return 'null';
+}
+
+function hasLoot(root: JV): boolean {
+  if (root.t !== 'obj') return false;
+  for (const ln of ['blocks', 'changes']) {
+    const list = root.m.get(ln);
+    if (list?.t !== 'arr') continue;
+    for (const one of list.a) {
+      const kind = getStr(one, ln === 'changes' ? 'block' : 'kind');
+      if (kind.startsWith('loot')) return true;
+    }
+  }
+  return false;
+}
+
+/** The editor part's project part in the form of version 1 (DZS_WorkFolder.PartV1 and Unlisted). */
+function partV1(root: JV & { t: 'obj' }, paths: Map<string, string>): JV {
+  const ed = root.m.get('editor');
+  const given = ed?.t === 'obj' ? ed.m.get('project') : undefined;
+  let part: { t: 'obj'; m: Map<string, JV> };
+  if (given?.t === 'obj') part = { t: 'obj', m: new Map(given.m) };
+  else {
+    part = jObj();
+    const loot = jObj();
+    loot.m.set('enabled', jBool(hasLoot(root)));
+    part.m.set('loot', loot);
+  }
+  let groups = part.m.get('groups');
+  if (groups?.t === 'arr') {
+    groups = {
+      t: 'arr',
+      a: groups.a.map((g) => {
+        if (g.t !== 'obj' || !g.m.has('block')) return g;
+        const id = getStr(g, 'block');
+        const rel = paths.get(id) ?? `${id}.json`;
+        const fresh = new Map<string, JV>();
+        for (const [k, x] of g.m) fresh.set(k === 'block' ? 'file' : k, k === 'block' ? jStr(rel) : x);
+        return { t: 'obj', m: fresh };
+      }),
+    };
+    part.m.set('groups', groups);
+  }
+  let loot = part.m.get('loot');
+  if (loot?.t !== 'obj') {
+    loot = jObj();
+    loot.m.set('enabled', jBool(false));
+    part.m.set('loot', loot);
+  } else {
+    loot = { t: 'obj', m: new Map(loot.m) };
+    part.m.set('loot', loot);
+  }
+  if (!loot.m.has('hidden')) loot.m.set('hidden', jBool(false));
+  if (!loot.m.has('locked')) loot.m.set('locked', jBool(false));
+  loot.m.set('projectId', { t: 'null' });
+  loot.m.set('writtenTypes', { t: 'arr', a: [] });
+
+  if (groups?.t !== 'arr') {
+    groups = { t: 'arr', a: [] };
+    part.m.set('groups', groups);
+  }
+  const files: string[] = [];
+  const colors: string[] = [];
+  for (const g of groups.a) {
+    if (g.t !== 'obj') continue;
+    files.push(getStr(g, 'file'));
+    colors.push(getStr(g, 'color'));
+  }
+  const blocks = root.m.get('blocks');
+  if (blocks?.t === 'arr') {
+    for (const b of blocks.a) {
+      if (b.t !== 'obj' || getStr(b, 'kind') !== 'spawnerGroup') continue;
+      const rel = paths.get(getStr(b, 'id'));
+      if (rel === undefined || files.includes(rel)) continue;
+      const data = b.m.get('data');
+      let gname = getStr(b, 'id');
+      let count = 0;
+      if (data?.t === 'obj') {
+        if (getStr(data, 'name') !== '') gname = getStr(data, 'name');
+        const objs = data.m.get('objects');
+        if (objs?.t === 'arr') count = objs.a.length;
+      }
+      const color = nextColor(colors);
+      colors.push(color);
+      files.push(rel);
+      groups.a.push({
+        t: 'obj',
+        m: new Map<string, JV>([
+          ['file', jStr(rel)],
+          ['name', jStr(gname)],
+          ['color', jStr(color)],
+          ['hidden', jBool(false)],
+          ['locked', jBool(false)],
+          ['objectCount', { t: 'num', s: String(count) }],
+          ['objects', { t: 'arr', a: [] }],
+          ['plugins', jObj()],
+        ]),
+      });
+    }
+  }
+  return part;
+}
+
+interface V2Project {
+  pf: PFData;
+  /** The group files dzStudio writes into its working folder, by path. */
+  files: Map<string, string>;
+}
+
+/** The project file of version 2 as dzStudio opens it; undefined for any other file. */
+function readV2(text: string | undefined, notes: string[]): V2Project | undefined {
+  if (text === undefined) return undefined;
+  const doc = parseSrc(text);
+  const root = doc.root;
+  if (root?.type !== 'obj') return undefined;
+  const fmt = root.get('format');
+  const ver = root.get('version');
+  if (fmt?.type !== 'str' || fmt.str !== 'dzstudio-project' || ver?.type !== 'num' || ver.str !== '2') return undefined;
+  const jr = toJV(root) as JV & { t: 'obj' };
+  const blocks = jr.m.get('blocks');
+  const changes = jr.m.get('changes');
+  if ((blocks?.t === 'arr' && blocks.a.some((b) => b.t !== 'obj')) || (changes?.t === 'arr' && changes.a.some((c) => c.t !== 'obj')))
+    throw new LoadRefused('The project file is not readable');
+  const slug = getStr(jr, 'slug') || 'project';
+  const files = new Map<string, string>();
+  const paths = new Map<string, string>();
+  if (blocks?.t === 'arr') {
+    for (const b of blocks.a) {
+      if (getStr(b, 'kind') !== 'spawnerGroup') continue;
+      const id = getStr(b, 'id');
+      const data = b.t === 'obj' ? b.m.get('data') : undefined;
+      const objs = data?.t === 'obj' ? data.m.get('objects') : undefined;
+      const list: JV = objs?.t === 'arr' ? objs : { t: 'arr', a: [] };
+      const rel = `dzstudio/${slug}/${id}.json`;
+      files.set(rel, textForm({ t: 'obj', m: new Map([['Objects', list]]) }, 0) + '\n');
+      paths.set(id, rel);
+    }
+  }
+  const projText = textForm(partV1(jr, paths), 1);
+  const reparsed = parseSrc(projText);
+  return { pf: readProjectPart(reparsed, reparsed.root!, notes), files };
+}
+
 // ---------------------------------------------------------------- group files (Object Spawner)
 
 interface ReadObject {
@@ -598,8 +801,15 @@ export function loadProject(input: LoadInput): LoadResult {
   }
 
   let pf: PFData;
+  let fileText = (name: string): string => input.files.get(name)!;
   try {
-    pf = readProjectFile(projectText, notes);
+    const v2 = readV2(projectText, notes);
+    if (v2) {
+      pf = v2.pf;
+      groupFiles.length = 0;
+      groupFiles.push(...v2.files.keys());
+      fileText = (name) => v2.files.get(name)!;
+    } else pf = readProjectFile(projectText, notes);
   } catch (e) {
     if (e instanceof SrcUnsupported) throw new LoadRefused(`The project file holds ${e.message}`);
     throw e;
@@ -662,7 +872,7 @@ export function loadProject(input: LoadInput): LoadResult {
   for (const { entry, file } of order) {
     let rr: ReadResult;
     try {
-      rr = readSpawner(input.files.get(file)!, classKnown);
+      rr = readSpawner(fileText(file), classKnown);
     } catch (e) {
       if (e instanceof SrcUnsupported) throw new LoadRefused(`${file} holds ${e.message}`);
       throw e;

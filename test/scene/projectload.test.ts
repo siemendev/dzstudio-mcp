@@ -241,9 +241,31 @@ describe('opening a hosted project from its files', () => {
     expect(refused({ 'a.json': spawner([{ name: 'DZ\\plants\\tree\\t_x.p3d', pos: [0, 0, 0], ypr: [0, 0, 0] }]) })).toContain('model');
     expect(refused({ manifest: manifest([]).replace('"enabled": false', '"enabled": true') })).toContain('Loot');
     expect(refused({ 'a.json': spawner([FLAG]) }, false)).toContain('class data');
-    expect(refused({ manifest: '{"format":"dzstudio-project","version":2}' })).toContain('newer');
+    expect(refused({ manifest: '{"format":"dzstudio-project","version":3}' })).toContain('newer');
     expect(refused({ 'a.json': '{"Objects":[{"name":"A\\u0000B"}]}' })).toContain('\\u0000');
     expect(refused({ 'a.json': '{}', 'A.json': '{}' })).toContain('case');
+  });
+
+  it('opens a project file of version 2 from its spawner blocks and its editor part', () => {
+    const block = (o: SpawnerObject): string =>
+      `{"name": ${q(o.name)}, "pos": [${o.pos.map(writeFloat32).join(', ')}], "ypr": [${o.ypr.map(writeFloat32).join(', ')}], ` +
+      `"scale": ${writeFloat32(o.scale ?? 1)}, "enableCEPersistency": ${o.persist ? 1 : 0}, "customString": ${q(o.custom ?? '')}}`;
+    const project = (editor: string): string =>
+      `{"format": "dzstudio-project", "version": 2, "map": "chernarus", "slug": "my-base", ` +
+      `"blocks": [{"id": "g-objects", "kind": "spawnerGroup", "parent": null, "data": {"name": "Objects", "objects": [${block(FLAG)}]}}], ` +
+      `"changes": []${editor}}`;
+    const entry = groupEntry('objects.json', 'Objects', '#60A5FA', 1).replace('"file": "objects.json"', '"block": "g-objects"');
+    const editor = `, "editor": {"provider": {"name": "My base", "map": "chernarus"}, "base": "vanilla", "project": ${manifest([entry]).slice(manifest([entry]).indexOf('"project": ') + 11, -3)}}`;
+    const want = golden.Z1!.replace(/"objects\.json"/g, '"dzstudio/my-base/g-objects.json"');
+    // older group files beside the project file are not part of it
+    const { state, groups } = load({ manifest: project(editor), 'objects.json': spawner([FLAG, FLAG]) });
+    expect(groups).toBe(1);
+    expect(state).toBe(want);
+    // without an editor part the block's name names the group
+    const bare = load({ manifest: project('') });
+    expect(bare.groups).toBe(1);
+    expect(bare.state).toContain('"Objects"');
+    expect(bare.state).toContain('dzstudio/my-base/g-objects.json');
   });
 
   it('opens without class data when no object names a class', () => {
