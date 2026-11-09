@@ -255,12 +255,19 @@ describe('opening a hosted project from its files', () => {
       `"blocks": [{"id": "g-objects", "kind": "spawnerGroup", "parent": null, "data": {"name": "Objects", "objects": [${block(FLAG)}]}}], ` +
       `"changes": []${editor}}`;
     const entry = groupEntry('objects.json', 'Objects', '#60A5FA', 1).replace('"file": "objects.json"', '"block": "g-objects"');
-    const editor = `, "editor": {"provider": {"name": "My base", "map": "chernarus"}, "base": "vanilla", "project": ${manifest([entry]).slice(manifest([entry]).indexOf('"project": ') + 11, -3)}}`;
+    const editorPart = `{"provider": {"name": "My base", "map": "chernarus"}, "base": "vanilla", "project": ${manifest([entry]).slice(manifest([entry]).indexOf('"project": ') + 11, -3)}}`;
+    const editor = `, "extensions": {"https://developers.dzbot.de/specs/dzbot/rules/1.json": {"data": {}}, "https://developers.dzbot.de/specs/dzstudio/editor/1.json": {"data": ${editorPart}}}`;
     const want = golden.Z1!.replace(/"objects\.json"/g, '"dzstudio/my-base/g-objects.json"');
     // older group files beside the project file are not part of it
     const { state, groups } = load({ manifest: project(editor), 'objects.json': spawner([FLAG, FLAG]) });
     expect(groups).toBe(1);
     expect(state).toBe(want);
+    // a file from before the extension holds its editor part on top
+    expect(load({ manifest: project(`, "editor": ${editorPart}`) }).state).toBe(want);
+    // an editor part of another version (another URL) is not read: the group gets the block's name
+    const mine = editor.replace('"name": "Objects"', '"name": "Mine"');
+    expect(load({ manifest: project(mine) }).state).toContain('"Mine"');
+    expect(load({ manifest: project(mine.replace('/dzstudio/editor/1.json', '/dzstudio/editor/2.json')) }).state).not.toContain('"Mine"');
     // without an editor part the block's name names the group
     const bare = load({ manifest: project('') });
     expect(bare.groups).toBe(1);

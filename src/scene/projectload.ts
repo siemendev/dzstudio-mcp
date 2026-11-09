@@ -4,8 +4,8 @@
  * format, all as one `core:load` operation. The result is the same state a dzStudio would upload as snapshot 0.
  *
  * A project file of version 2 holds the whole project: its `spawnerGroup` blocks become the group files dzStudio
- * writes into its working folder (`dzstudio/<slug>/<block id>.json`), its `editor` part the project part of
- * version 1; other files of the store are left out, as dzStudio does.
+ * writes into its working folder (`dzstudio/<slug>/<block id>.json`), its editor part (dzStudio's editor extension)
+ * the project part of version 1; other files of the store are left out, as dzStudio does.
  *
  * Where the editor's result depends on the running game and not on the files alone — a model path (the game places
  * the model to learn its origin) or loot that is turned on (it reads the loot files and the vanilla baseline) — the
@@ -396,9 +396,27 @@ function hasLoot(root: JV): boolean {
   return false;
 }
 
+/** dzStudio's editor extension: the URL of its spec (the version is part of it). */
+const EDITOR_EXT = 'https://developers.dzbot.de/specs/dzstudio/editor/1.json';
+
+/**
+ * The editor part (DZS_ProjectFile.EditorOf): the data of the editor extension; a file written before the extension
+ * existed has it as the top-level `editor`.
+ */
+function editorOf(root: JV & { t: 'obj' }): JV | undefined {
+  const list = root.m.get('extensions');
+  const entry = list?.t === 'obj' ? list.m.get(EDITOR_EXT) : undefined;
+  if (entry?.t === 'obj') {
+    const data = entry.m.get('data');
+    if (data?.t === 'obj') return data;
+  }
+  const old = root.m.get('editor');
+  return old?.t === 'obj' ? old : undefined;
+}
+
 /** The editor part's project part in the form of version 1 (DZS_WorkFolder.PartV1 and Unlisted). */
 function partV1(root: JV & { t: 'obj' }, paths: Map<string, string>): JV {
-  const ed = root.m.get('editor');
+  const ed = editorOf(root);
   const given = ed?.t === 'obj' ? ed.m.get('project') : undefined;
   let part: { t: 'obj'; m: Map<string, JV> };
   if (given?.t === 'obj') part = { t: 'obj', m: new Map(given.m) };
