@@ -262,8 +262,8 @@ describe('opening a hosted project from its files', () => {
     const { state, groups } = load({ manifest: project(editor), 'objects.json': spawner([FLAG, FLAG]) });
     expect(groups).toBe(1);
     expect(state).toBe(want);
-    // a file from before the extension holds its editor part on top
-    expect(load({ manifest: project(`, "editor": ${editorPart}`) }).state).toBe(want);
+    // a top-level editor part is not read: only the extension counts
+    expect(load({ manifest: project(`, "editor": ${editorPart.replace('"name": "Objects"', '"name": "Mine"')}`) }).state).not.toContain('"Mine"');
     // an editor part of another version (another URL) is not read: the group gets the block's name
     const mine = editor.replace('"name": "Objects"', '"name": "Mine"');
     expect(load({ manifest: project(mine) }).state).toContain('"Mine"');

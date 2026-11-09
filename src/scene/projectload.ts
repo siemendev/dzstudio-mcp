@@ -399,10 +399,7 @@ function hasLoot(root: JV): boolean {
 /** dzStudio's editor extension: the URL of its spec (the version is part of it). */
 const EDITOR_EXT = 'https://developers.dzbot.de/specs/dzstudio/editor/1.json';
 
-/**
- * The editor part (DZS_ProjectFile.EditorOf): the data of the editor extension; a file written before the extension
- * existed has it as the top-level `editor`.
- */
+/** The editor part (DZS_ProjectFile.EditorOf): the data of the editor extension. */
 function editorOf(root: JV & { t: 'obj' }): JV | undefined {
   const list = root.m.get('extensions');
   const entry = list?.t === 'obj' ? list.m.get(EDITOR_EXT) : undefined;
@@ -410,8 +407,7 @@ function editorOf(root: JV & { t: 'obj' }): JV | undefined {
     const data = entry.m.get('data');
     if (data?.t === 'obj') return data;
   }
-  const old = root.m.get('editor');
-  return old?.t === 'obj' ? old : undefined;
+  return undefined;
 }
 
 /** The editor part's project part in the form of version 1 (DZS_WorkFolder.PartV1 and Unlisted). */
