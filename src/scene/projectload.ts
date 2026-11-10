@@ -5,7 +5,9 @@
  *
  * A project file of version 2 holds the whole project: its `spawnerGroup` blocks become the group files dzStudio
  * writes into its working folder (`dzstudio/<slug>/<block id>.json`), its editor part (dzStudio's editor extension)
- * the project part of version 1; other files of the store are left out, as dzStudio does.
+ * the project part of version 1; other files of the store are left out, as dzStudio does. Anything else a version 2
+ * file can hold — other blocks and changes (layers, kinds dzStudio only carries over), extensions of the project or of
+ * its entities — dzStudio takes into its model in ways this load does not repeat, so such a file is refused.
  *
  * Where the editor's result depends on the running game and not on the files alone — a model path (the game places
  * the model to learn its origin) or loot that is turned on (it reads the loot files and the vanilla baseline) — the
@@ -497,6 +499,54 @@ function partV1(root: JV & { t: 'obj' }, paths: Map<string, string>): JV {
   return part;
 }
 
+/** Whether a value holds an `extensions` member at any depth. */
+function hasExtensions(v: JV): boolean {
+  if (v.t === 'obj') return v.m.has('extensions') || [...v.m.values()].some(hasExtensions);
+  if (v.t === 'arr') return v.a.some(hasExtensions);
+  return false;
+}
+
+/** Refuses a version 2 file holding more than spawner groups and dzStudio's editor part. */
+function refuseBeyondSpawners(root: JV & { t: 'obj' }): void {
+  const blocks = root.m.get('blocks');
+  const changes = root.m.get('changes');
+  if (blocks?.t === 'arr' && blocks.a.some((b) => getStr(b, 'kind') !== 'spawnerGroup'))
+    throw new LoadRefused('The project file holds building blocks other than object groups; open it in dzStudio');
+  if (changes?.t === 'arr' && changes.a.length > 0)
+    throw new LoadRefused('The project file holds changes to mission files; open it in dzStudio');
+  if (blocks?.t === 'arr' && blocks.a.some(hasExtensions))
+    throw new LoadRefused('The project file holds extensions of its objects; open it in dzStudio');
+  const exts = root.m.get('extensions');
+  if (exts?.t === 'obj' && [...exts.m.keys()].some((url) => url !== EDITOR_EXT))
+    throw new LoadRefused('The project file holds extensions; open it in dzStudio');
+}
+
+/**
+ * The project part's plugins as dzStudio's opening leaves them for a file of spawner groups only: the layers made anew
+ * from the (absent) layer blocks, so none, and the carried-over part holding just the file's slug (DZS_LayerTake.Put,
+ * DZS_KeptBlocks.Put).
+ */
+function keptPart(part: JV & { t: 'obj' }, slug: string): void {
+  let plugins = part.m.get('plugins');
+  if (plugins?.t !== 'obj') {
+    plugins = jObj();
+    part.m.set('plugins', plugins);
+  } else {
+    plugins = { t: 'obj', m: new Map(plugins.m) };
+    part.m.set('plugins', plugins);
+  }
+  for (const name of ['territories', 'spawns', 'effects', 'kept']) plugins.m.delete(name);
+  if (slug === '') return;
+  plugins.m.set('kept', {
+    t: 'obj',
+    m: new Map<string, JV>([
+      ['blocks', { t: 'arr', a: [] }],
+      ['changes', { t: 'arr', a: [] }],
+      ['slug', jStr(slug)],
+    ]),
+  });
+}
+
 interface V2Project {
   pf: PFData;
   /** The group files dzStudio writes into its working folder, by path. */
@@ -517,7 +567,9 @@ function readV2(text: string | undefined, notes: string[]): V2Project | undefine
   const changes = jr.m.get('changes');
   if ((blocks?.t === 'arr' && blocks.a.some((b) => b.t !== 'obj')) || (changes?.t === 'arr' && changes.a.some((c) => c.t !== 'obj')))
     throw new LoadRefused('The project file is not readable');
-  const slug = getStr(jr, 'slug') || 'project';
+  refuseBeyondSpawners(jr);
+  const fileSlug = getStr(jr, 'slug');
+  const slug = fileSlug || 'project';
   const files = new Map<string, string>();
   const paths = new Map<string, string>();
   if (blocks?.t === 'arr') {
@@ -532,7 +584,9 @@ function readV2(text: string | undefined, notes: string[]): V2Project | undefine
       paths.set(id, rel);
     }
   }
-  const projText = textForm(partV1(jr, paths), 1);
+  const part = partV1(jr, paths) as JV & { t: 'obj' };
+  keptPart(part, fileSlug);
+  const projText = textForm(part, 1);
   const reparsed = parseSrc(projText);
   return { pf: readProjectPart(reparsed, reparsed.root!, notes), files };
 }

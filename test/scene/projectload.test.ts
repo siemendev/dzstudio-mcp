@@ -228,16 +228,17 @@ describe('opening a hosted project from its files', () => {
     expect(notes.join()).toContain('not readable');
   });
 
+  const refused = (files: Record<string, string>, classes = true): string => {
+    try {
+      load(files, { classes });
+    } catch (e) {
+      expect(e).toBeInstanceOf(LoadRefused);
+      return (e as Error).message;
+    }
+    throw new Error('not refused');
+  };
+
   it('refuses what only the game can open', () => {
-    const refused = (files: Record<string, string>, classes = true): string => {
-      try {
-        load(files, { classes });
-      } catch (e) {
-        expect(e).toBeInstanceOf(LoadRefused);
-        return (e as Error).message;
-      }
-      throw new Error('not refused');
-    };
     expect(refused({ 'a.json': spawner([{ name: 'DZ\\plants\\tree\\t_x.p3d', pos: [0, 0, 0], ypr: [0, 0, 0] }]) })).toContain('model');
     expect(refused({ manifest: manifest([]).replace('"enabled": false', '"enabled": true') })).toContain('Loot');
     expect(refused({ 'a.json': spawner([FLAG]) }, false)).toContain('class data');
@@ -250,24 +251,45 @@ describe('opening a hosted project from its files', () => {
     const block = (o: SpawnerObject): string =>
       `{"name": ${q(o.name)}, "pos": [${o.pos.map(writeFloat32).join(', ')}], "ypr": [${o.ypr.map(writeFloat32).join(', ')}], ` +
       `"scale": ${writeFloat32(o.scale ?? 1)}, "enableCEPersistency": ${o.persist ? 1 : 0}, "customString": ${q(o.custom ?? '')}}`;
-    const project = (editor: string): string =>
-      `{"format": "dzstudio-project", "version": 2, "map": "chernarus", "slug": "my-base", ` +
-      `"blocks": [{"id": "g-objects", "kind": "spawnerGroup", "parent": null, "data": {"name": "Objects", "objects": [${block(FLAG)}]}}], ` +
-      `"changes": []${editor}}`;
+    const project = (editor: string, more = '', changes = '', slug = 'my-base'): string =>
+      `{"format": "dzstudio-project", "version": 2, "map": "chernarus", "slug": ${q(slug)}, ` +
+      `"blocks": [{"id": "g-objects", "kind": "spawnerGroup", "parent": null, "data": {"name": "Objects", "objects": [${block(FLAG)}]}}${more}], ` +
+      `"changes": [${changes}]${editor}}`;
     const entry = groupEntry('objects.json', 'Objects', '#60A5FA', 1).replace('"file": "objects.json"', '"block": "g-objects"');
     const editorPart = `{"provider": {"name": "My base", "map": "chernarus"}, "base": "vanilla", "project": ${manifest([entry]).slice(manifest([entry]).indexOf('"project": ') + 11, -3)}}`;
-    const editor = `, "extensions": {"https://developers.dzbot.de/specs/dzbot/rules/1.json": {"data": {}}, "https://developers.dzbot.de/specs/dzstudio/editor/1.json": {"data": ${editorPart}}}`;
+    const editor = `, "extensions": {"https://developers.dzbot.de/specs/dzstudio/editor/1.json": {"data": ${editorPart}}}`;
     const want = golden.Z1!.replace(/"objects\.json"/g, '"dzstudio/my-base/g-objects.json"');
-    // older group files beside the project file are not part of it
-    const { state, groups } = load({ manifest: project(editor), 'objects.json': spawner([FLAG, FLAG]) });
+    // older group files beside the project file are not part of it; without a slug nothing is carried over
+    const { state, groups } = load({ manifest: project(editor, '', '', ''), 'objects.json': spawner([FLAG, FLAG]) });
     expect(groups).toBe(1);
-    expect(state).toBe(want);
+    expect(state).toBe(want.replace(/dzstudio\/my-base\//g, 'dzstudio/project/'));
+    // the file's slug stays with the project, as dzStudio's opening keeps it
+    const slugged = load({ manifest: project(editor) }).state;
+    expect(slugged).toContain('kept');
+    expect(slugged).toContain('my-base');
+    // what dzStudio would take into its model in ways this load does not: refused, never dropped
+    const rules = editor.replace(
+      '"extensions": {',
+      '"extensions": {"https://developers.dzbot.de/specs/dzbot/rules/1.json": {"data": {}}, ',
+    );
+    expect(refused({ manifest: project(rules) })).toContain('extensions');
+    expect(
+      refused({ manifest: project(editor, ', {"id": "ev-1", "kind": "event", "parent": null, "data": {"name": "StaticX"}}') }),
+    ).toContain('building blocks');
+    expect(
+      refused({ manifest: project(editor, '', '{"op": "set", "block": "event", "key": {"name": "X"}, "field": "nominal", "to": 1}') }),
+    ).toContain('changes');
+    expect(refused({ manifest: project(editor).replace('"parent": null, "data"', '"parent": null, "extensions": {}, "data"') })).toContain(
+      'extensions',
+    );
     // a top-level editor part is not read: only the extension counts
-    expect(load({ manifest: project(`, "editor": ${editorPart.replace('"name": "Objects"', '"name": "Mine"')}`) }).state).not.toContain('"Mine"');
-    // an editor part of another version (another URL) is not read: the group gets the block's name
+    expect(load({ manifest: project(`, "editor": ${editorPart.replace('"name": "Objects"', '"name": "Mine"')}`) }).state).not.toContain(
+      '"Mine"',
+    );
+    // an editor part of another version (another URL) is an extension dzStudio would carry: refused
     const mine = editor.replace('"name": "Objects"', '"name": "Mine"');
     expect(load({ manifest: project(mine) }).state).toContain('"Mine"');
-    expect(load({ manifest: project(mine.replace('/dzstudio/editor/1.json', '/dzstudio/editor/2.json')) }).state).not.toContain('"Mine"');
+    expect(refused({ manifest: project(mine.replace('/dzstudio/editor/1.json', '/dzstudio/editor/2.json')) })).toContain('extensions');
     // without an editor part the block's name names the group
     const bare = load({ manifest: project('') });
     expect(bare.groups).toBe(1);
