@@ -5,9 +5,10 @@
  *
  * A project file of version 2 holds the whole project: its `spawnerGroup` blocks become the group files dzStudio
  * writes into its working folder (`dzstudio/<slug>/<block id>.json`), its editor part (dzStudio's editor extension)
- * the project part of version 1; other files of the store are left out, as dzStudio does. Anything else a version 2
- * file can hold — other blocks and changes (layers, kinds dzStudio only carries over), extensions of the project or of
- * its entities — dzStudio takes into its model in ways this load does not repeat, so such a file is refused.
+ * the project part of version 1; other files of the store are left out, as dzStudio does. The layers (Spawns, Effects,
+ * Territories) take the blocks and changes they would write back as they are, everything else is carried over
+ * unchanged, and after the load each layer restores its elements as a system operation of its own, followed by the
+ * project's extensions — in the order dzStudio's plugins do it.
  *
  * Where the editor's result depends on the running game and not on the files alone — a model path (the game places
  * the model to learn its origin) or loot that is turned on (it reads the loot files and the vanilla baseline) — the
@@ -17,7 +18,11 @@
 import { readFloat32, writeFloat32 } from './float32.js';
 import type { IdAllocator } from './ids.js';
 import { PROJECT_ID } from './ids.js';
+import { OpBuilder } from './edits.js';
 import { writeString } from './json.js';
+import { getStr, jBool, jObj, jStr, textForm, toJV, type JObj, type JV } from './jv.js';
+import { EDITOR_EXT, FileExtensions, openedExtensionEdits, putKept, putLayers, RestoreSrc, RESTORE_ORDER } from './layers.js';
+import { Scene } from './scene.js';
 import { parseSrc, SrcUnsupported, type SrcDoc, type SrcNode } from './srcjson.js';
 import type { Change, Comp, Element, Operation } from './textform.js';
 
@@ -42,6 +47,10 @@ export interface LoadInput {
 
 export interface LoadResult {
   op: Operation;
+  /** The system operations dzStudio's opening makes after the load: layers restored, project extensions taken. */
+  followUps: Operation[];
+  /** Elements the layers restored. */
+  layerElements: number;
   groups: number;
   objects: number;
   /** What the editor would report on opening, in English. */
@@ -328,63 +337,6 @@ function readProjectFile(text: string | undefined, notes: string[]): PFData {
 
 // ---------------------------------------------------------------- version 2: building blocks and the editor part
 
-/** A JSON value as dzStudio's DZS_Json holds it: numbers as their text, the last of duplicate keys in the first place. */
-type JV =
-  | { t: 'obj'; m: Map<string, JV> }
-  | { t: 'arr'; a: JV[] }
-  | { t: 'num'; s: string }
-  | { t: 'str'; s: string }
-  | { t: 'bool'; b: boolean }
-  | { t: 'null' };
-
-function toJV(n: SrcNode): JV {
-  switch (n.type) {
-    case 'obj': {
-      const m = new Map<string, JV>();
-      n.keys.forEach((k, i) => m.set(k, toJV(n.items[i]!)));
-      return { t: 'obj', m };
-    }
-    case 'arr':
-      return { t: 'arr', a: n.items.map(toJV) };
-    case 'num':
-      return { t: 'num', s: n.str };
-    case 'str':
-      return { t: 'str', s: n.str };
-    case 'bool':
-      return { t: 'bool', b: n.bool };
-    default:
-      return { t: 'null' };
-  }
-}
-
-const jStr = (s: string): JV => ({ t: 'str', s });
-const jBool = (b: boolean): JV => ({ t: 'bool', b });
-const jObj = (): { t: 'obj'; m: Map<string, JV> } => ({ t: 'obj', m: new Map() });
-
-function getStr(v: JV | undefined, key: string): string {
-  if (v?.t !== 'obj') return '';
-  const x = v.m.get(key);
-  return x?.t === 'str' ? x.s : '';
-}
-
-/** dzStudio's text form (DZS_TextForm.Value): 4 spaces per level, one field per line, empty {} and [] inline. */
-function textForm(v: JV, depth: number): string {
-  const ind = (d: number): string => '    '.repeat(d);
-  if (v.t === 'arr') {
-    if (!v.a.length) return '[]';
-    return `[\n${v.a.map((x) => ind(depth + 1) + textForm(x, depth + 1)).join(',\n')}\n${ind(depth)}]`;
-  }
-  if (v.t === 'obj') {
-    if (!v.m.size) return '{}';
-    const lines = [...v.m].map(([k, x]) => `${ind(depth + 1)}${writeString(k)}: ${textForm(x, depth + 1)}`);
-    return `{\n${lines.join(',\n')}\n${ind(depth)}}`;
-  }
-  if (v.t === 'num') return v.s;
-  if (v.t === 'str') return writeString(v.s);
-  if (v.t === 'bool') return String(v.b);
-  return 'null';
-}
-
 function hasLoot(root: JV): boolean {
   if (root.t !== 'obj') return false;
   for (const ln of ['blocks', 'changes']) {
@@ -397,9 +349,6 @@ function hasLoot(root: JV): boolean {
   }
   return false;
 }
-
-/** dzStudio's editor extension: the URL of its spec (the version is part of it). */
-const EDITOR_EXT = 'https://developers.dzbot.de/specs/dzstudio/editor/1.json';
 
 /** The editor part (DZS_ProjectFile.EditorOf): the data of the editor extension. */
 function editorOf(root: JV & { t: 'obj' }): JV | undefined {
@@ -499,58 +448,15 @@ function partV1(root: JV & { t: 'obj' }, paths: Map<string, string>): JV {
   return part;
 }
 
-/** Whether a value holds an `extensions` member at any depth. */
-function hasExtensions(v: JV): boolean {
-  if (v.t === 'obj') return v.m.has('extensions') || [...v.m.values()].some(hasExtensions);
-  if (v.t === 'arr') return v.a.some(hasExtensions);
-  return false;
-}
-
-/** Refuses a version 2 file holding more than spawner groups and dzStudio's editor part. */
-function refuseBeyondSpawners(root: JV & { t: 'obj' }): void {
-  const blocks = root.m.get('blocks');
-  const changes = root.m.get('changes');
-  if (blocks?.t === 'arr' && blocks.a.some((b) => getStr(b, 'kind') !== 'spawnerGroup'))
-    throw new LoadRefused('The project file holds building blocks other than object groups; open it in dzStudio');
-  if (changes?.t === 'arr' && changes.a.length > 0)
-    throw new LoadRefused('The project file holds changes to mission files; open it in dzStudio');
-  if (blocks?.t === 'arr' && blocks.a.some(hasExtensions))
-    throw new LoadRefused('The project file holds extensions of its objects; open it in dzStudio');
-  const exts = root.m.get('extensions');
-  if (exts?.t === 'obj' && [...exts.m.keys()].some((url) => url !== EDITOR_EXT))
-    throw new LoadRefused('The project file holds extensions; open it in dzStudio');
-}
-
-/**
- * The project part's plugins as dzStudio's opening leaves them for a file of spawner groups only: the layers made anew
- * from the (absent) layer blocks, so none, and the carried-over part holding just the file's slug (DZS_LayerTake.Put,
- * DZS_KeptBlocks.Put).
- */
-function keptPart(part: JV & { t: 'obj' }, slug: string): void {
-  let plugins = part.m.get('plugins');
-  if (plugins?.t !== 'obj') {
-    plugins = jObj();
-    part.m.set('plugins', plugins);
-  } else {
-    plugins = { t: 'obj', m: new Map(plugins.m) };
-    part.m.set('plugins', plugins);
-  }
-  for (const name of ['territories', 'spawns', 'effects', 'kept']) plugins.m.delete(name);
-  if (slug === '') return;
-  plugins.m.set('kept', {
-    t: 'obj',
-    m: new Map<string, JV>([
-      ['blocks', { t: 'arr', a: [] }],
-      ['changes', { t: 'arr', a: [] }],
-      ['slug', jStr(slug)],
-    ]),
-  });
-}
-
 interface V2Project {
   pf: PFData;
   /** The group files dzStudio writes into its working folder, by path. */
   files: Map<string, string>;
+  /** The layers' parts of the project part (project.plugins.<layer>), as they restore their elements from them. */
+  layers: Map<string, JV>;
+  /** The entities' extensions of the file until the layers take theirs. */
+  exts: FileExtensions;
+  root: JObj;
 }
 
 /** The project file of version 2 as dzStudio opens it; undefined for any other file. */
@@ -562,12 +468,12 @@ function readV2(text: string | undefined, notes: string[]): V2Project | undefine
   const fmt = root.get('format');
   const ver = root.get('version');
   if (fmt?.type !== 'str' || fmt.str !== 'dzstudio-project' || ver?.type !== 'num' || ver.str !== '2') return undefined;
-  const jr = toJV(root) as JV & { t: 'obj' };
+  const jr = toJV(root) as JObj;
   const blocks = jr.m.get('blocks');
   const changes = jr.m.get('changes');
   if ((blocks?.t === 'arr' && blocks.a.some((b) => b.t !== 'obj')) || (changes?.t === 'arr' && changes.a.some((c) => c.t !== 'obj')))
     throw new LoadRefused('The project file is not readable');
-  refuseBeyondSpawners(jr);
+  const exts = FileExtensions.load(jr);
   const fileSlug = getStr(jr, 'slug');
   const slug = fileSlug || 'project';
   const files = new Map<string, string>();
@@ -584,11 +490,20 @@ function readV2(text: string | undefined, notes: string[]): V2Project | undefine
       paths.set(id, rel);
     }
   }
-  const part = partV1(jr, paths) as JV & { t: 'obj' };
-  keptPart(part, fileSlug);
+  const part = partV1(jr, paths) as JObj;
+  const plugins = part.m.get('plugins');
+  if (plugins?.t === 'obj') part.m.set('plugins', { t: 'obj', m: new Map(plugins.m) });
+  putLayers(jr, part);
+  putKept(jr, part);
+  const layers = new Map<string, JV>();
+  const after = part.m.get('plugins');
+  for (const model of RESTORE_ORDER) {
+    const f = after?.t === 'obj' ? after.m.get(model.plugin) : undefined;
+    if (f) layers.set(model.plugin, f);
+  }
   const projText = textForm(part, 1);
   const reparsed = parseSrc(projText);
-  return { pf: readProjectPart(reparsed, reparsed.root!, notes), files };
+  return { pf: readProjectPart(reparsed, reparsed.root!, notes), files, layers, exts, root: jr };
 }
 
 // ---------------------------------------------------------------- group files (Object Spawner)
@@ -870,13 +785,15 @@ export function loadProject(input: LoadInput): LoadResult {
 
   let pf: PFData;
   let fileText = (name: string): string => input.files.get(name)!;
+  let v2: V2Project | undefined;
   try {
-    const v2 = readV2(projectText, notes);
+    v2 = readV2(projectText, notes);
     if (v2) {
       pf = v2.pf;
       groupFiles.length = 0;
       groupFiles.push(...v2.files.keys());
-      fileText = (name) => v2.files.get(name)!;
+      const groupTexts = v2.files;
+      fileText = (name) => groupTexts.get(name)!;
     } else pf = readProjectFile(projectText, notes);
   } catch (e) {
     if (e instanceof SrcUnsupported) throw new LoadRefused(`The project file holds ${e.message}`);
@@ -995,5 +912,40 @@ export function loadProject(input: LoadInput): LoadResult {
     origin: 'system',
     changes,
   };
-  return { op, groups: order.length, objects, notes };
+  // dzStudio applies its load in parts of 100 changes, each a system operation with an id of its own
+  for (let part = 1; part * 100 < changes.length; part++) input.ids.next();
+  const followUps: Operation[] = [];
+  let layerElements = 0;
+  if (v2) {
+    const scene = new Scene(input.ids);
+    if (scene.apply(op).result !== 'applied') throw new LoadRefused("The project's state does not open");
+    const by = { author: input.author, authorName: input.authorName };
+    const system = (b: OpBuilder): void => {
+      const done = b.finish();
+      done.origin = 'system';
+      const res = scene.apply(done);
+      if (res.result !== 'applied') throw new LoadRefused(`The project's ${done.type} does not open (${res.result})`);
+      followUps.push(done);
+    };
+    for (const model of RESTORE_ORDER) {
+      const frag = v2.layers.get(model.plugin);
+      if (!frag) continue;
+      const b = new OpBuilder(scene, model.op, by);
+      model.read(new RestoreSrc({ create: (kind, fields, fixedId) => b.createElement(kind, PROJECT_ID, fields, fixedId) }, v2.exts), frag);
+      layerElements += b.changes.length;
+      system(b);
+    }
+    if (v2.exts.pending > 0)
+      throw new LoadRefused(
+        'The project file holds extensions of its object groups, objects or carried-over entries; dzStudio hands those to its model ' +
+          'only after it has indexed the opened project, at a moment that depends on the game. Ask a person to open it in dzStudio.',
+      );
+    for (const edit of openedExtensionEdits(v2.root)) {
+      const b = new OpBuilder(scene, 'projects:edit', by);
+      b.setField(PROJECT_ID, edit.field, edit.value);
+      if (b.empty) b.abort();
+      else system(b);
+    }
+  }
+  return { op, followUps, layerElements, groups: order.length, objects, notes };
 }

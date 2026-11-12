@@ -76,7 +76,7 @@ function load(files: Record<string, string>, opts: { classes?: boolean } = {}) {
   const ids = new IdAllocator('k3f9a0x2mq');
   const res = loadProject({ files: new Map(Object.entries(files)), ids, ...PATRICK, ...(opts.classes === false ? {} : { classKnown }) });
   const scene = new Scene(new IdAllocator('k3f9a0x2mq'));
-  expect(scene.apply(res.op)).toEqual({ result: 'applied' });
+  for (const op of [res.op, ...res.followUps]) expect(scene.apply(op)).toEqual({ result: 'applied' });
   return { ...res, scene, state: scene.stateText() };
 }
 
@@ -267,20 +267,25 @@ describe('opening a hosted project from its files', () => {
     const slugged = load({ manifest: project(editor) }).state;
     expect(slugged).toContain('kept');
     expect(slugged).toContain('my-base');
-    // what dzStudio would take into its model in ways this load does not: refused, never dropped
+    // what else a version 2 file holds is taken into the model as dzStudio's opening does
     const rules = editor.replace(
       '"extensions": {',
       '"extensions": {"https://developers.dzbot.de/specs/dzbot/rules/1.json": {"data": {}}, ',
     );
-    expect(refused({ manifest: project(rules) })).toContain('extensions');
-    expect(
-      refused({ manifest: project(editor, ', {"id": "ev-1", "kind": "event", "parent": null, "data": {"name": "StaticX"}}') }),
-    ).toContain('building blocks');
-    expect(
-      refused({ manifest: project(editor, '', '{"op": "set", "block": "event", "key": {"name": "X"}, "field": "nominal", "to": 1}') }),
-    ).toContain('changes');
-    expect(refused({ manifest: project(editor).replace('"parent": null, "data"', '"parent": null, "extensions": {}, "data"') })).toContain(
-      'extensions',
+    const withRules = load({ manifest: project(rules) });
+    expect(withRules.scene.get('project')!.fields.get('ext:list')).toBe(
+      '{"https://developers.dzbot.de/specs/dzbot/rules/1.json":{"data":null}}',
+    );
+    expect(withRules.followUps.map((o) => o.type)).toEqual(['projects:edit']);
+    const event = load({ manifest: project(editor, ', {"id": "ev-1", "kind": "event", "parent": null, "data": {"name": "StaticX"}}') });
+    expect(event.state).toContain('ev-1');
+    expect(event.layerElements).toBe(0);
+    const nominal = load({
+      manifest: project(editor, '', '{"op": "set", "block": "event", "key": {"name": "X"}, "field": "nominal", "to": 1}'),
+    });
+    expect(nominal.followUps.map((o) => o.type)).toEqual(['spawns:edit']);
+    expect(load({ manifest: project(editor).replace('"parent": null, "data"', '"parent": null, "extensions": {}, "data"') }).state).toBe(
+      slugged,
     );
     // a top-level editor part is not read: only the extension counts
     expect(load({ manifest: project(`, "editor": ${editorPart.replace('"name": "Objects"', '"name": "Mine"')}`) }).state).not.toContain(
@@ -289,7 +294,12 @@ describe('opening a hosted project from its files', () => {
     // an editor part of another version (another URL) is an extension dzStudio would carry: refused
     const mine = editor.replace('"name": "Objects"', '"name": "Mine"');
     expect(load({ manifest: project(mine) }).state).toContain('"Mine"');
-    expect(refused({ manifest: project(mine.replace('/dzstudio/editor/1.json', '/dzstudio/editor/2.json')) })).toContain('extensions');
+    // an editor part of another version (another URL) is an extension dzStudio carries
+    const other = load({ manifest: project(mine.replace('/dzstudio/editor/1.json', '/dzstudio/editor/2.json')) });
+    expect(other.state).not.toContain('"Mine"');
+    expect(other.scene.get('project')!.fields.get('ext:project:https://developers.dzbot.de/specs/dzstudio/editor/2.json')).toContain(
+      '"Mine"',
+    );
     // without an editor part the block's name names the group
     const bare = load({ manifest: project('') });
     expect(bare.groups).toBe(1);
