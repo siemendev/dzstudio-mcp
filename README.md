@@ -100,8 +100,11 @@ limit is set in MB with `worldData.cacheLimitMb` in `config.json` or `DZSTUDIO_M
 | `list_projects`, `open_project`, `join_session` | Projects and sessions you may join; join one, or open a project on the server that nobody has open |
 | `list_sessions`, `switch_session`, `leave_session` | The sessions the agent is in; the current one is used when a tool names none |
 | `session_info`, `session_events` | Participants with phase and status, rights, save state; what happened since the last call |
-| `read_scene`, `query_objects` | Groups and objects of the project, by id, group, class, circle or rectangle |
+| `read_scene`, `query_objects` | Groups and objects of the project, by id, group, class, circle or rectangle; how many entries each layer holds |
 | `create_objects`, `modify_objects`, `delete_objects` | Each call is one step for everyone; objects are locked first |
+| `query_layers` | Entries of the layers Spawns, Effects and Territories, by layer, id, name, circle or rectangle, with position, radius and values; entries carried over unchanged come last, read-only |
+| `edit_spawns`, `edit_effects`, `edit_territories` | One step in a layer, as dzStudio makes it: spawn points, fixed vehicles and event counts; effect areas; zones and counts. Entries are locked first |
+| `read_extensions` | The project's extensions with their data (for example the dzbot rules of a project mod), read-only |
 | `release` | Let others edit objects the agent holds |
 | `set_status`, `request_review` | Phase (waiting for work, working, waiting for review) and the status line everyone sees |
 | `world_info` | World, data revisions, game version and export date for the session's map; place names near a point or by text |
@@ -112,9 +115,19 @@ limit is set in MB with `worldData.cacheLimitMb` in `config.json` or `DZSTUDIO_M
 | `class_info` | Size, clipping and collision box, radius, flags and raster of classes or models |
 
 Some rules the MCP keeps for the agent: it joins only servers that announce the `agents` capability, so nobody sees it
-as a human; it changes an existing object only while holding its lock; it never saves, invites, removes anyone or
-ends a session; it does not edit loot (loot entries pass through unchanged); after 30 minutes without work it leaves
-a session and joins again on the next task.
+as a human; it changes an existing object or layer entry only while holding its lock; it never saves, invites, removes
+anyone or ends a session; it does not edit loot (loot entries pass through unchanged), the entries a project carries over
+unchanged, or the project's extensions; after 30 minutes without work it leaves a session and joins again on the next task.
+
+**Layers.** The agent edits the Spawns, Effects and Territories layers with the same operations dzStudio sends for the
+same edit, numbers written the way the editor writes them (new effect areas are named as in the English editor, e.g.
+`DzsGeyser1`). What it can do there is what the session's state tells: own
+spawn points and fixed vehicles, own effect areas, own zones, and changes the project already makes to the mission's
+spawn points, areas, zones and counts (move again, remove, change a count back or on). Everything that needs the
+mission's own files — moving a base spawn point, area or zone the project does not touch yet, changing a count for the
+first time, a new zone of an animal or infected kind — dzStudio reads from the game's mission folder, so the agent leaves
+it to a person in dzStudio. Entries made outside dzStudio that no layer writes back as they are (dzbot's workbench, its
+AI, another program) are carried over unchanged and shown read-only, as dzStudio shows them.
 
 **Restarts.** The MCP keeps every session it is in, with its place in the session log and the project state there, in
 `sessions/` of the config directory. When it stops it does not leave; when it starts again it returns to each session
@@ -123,13 +136,17 @@ it back that way (it was away too long, or the server no longer has the log from
 would have left while idle meanwhile, or one that ended, is forgotten.
 
 **Opening a project nobody has open.** When no session is running for a project on the server, `open_project` loads
-its files and builds the project state exactly as dzStudio does when it opens them — the same groups, objects, ids form,
-companion data and order, byte for byte — then starts the session with it, as the only participant. This needs the right
-to save the project (the server checks it) and the class data (for each object, dzStudio notes whether the game knows its
-class; the class data stand in for the game). Where dzStudio's result depends on the running game and not on the files,
-the MCP refuses instead of opening a different state: a group file that places a model by its path (the game places the
-model to learn its origin), or a project with loot turned on. A person then opens it in dzStudio, and the agent joins
-that session. Agents never create a new project.
+its files and builds the project state exactly as dzStudio does when it opens them — the same groups, objects, layer
+entries, ids form, companion data and order, byte for byte — then starts the session with it, as the only participant.
+For a project file of version 2 that includes what dzStudio's opening does after the load: each layer takes the blocks
+and changes it would write back as they are and restores its elements from them, everything else is carried over
+unchanged, and the project's extensions (such as the dzbot rules) go into the state. This needs the right to save the
+project (the server checks it) and the class data (for each object, dzStudio notes whether the game knows its class; the
+class data stand in for the game). Where dzStudio's result depends on the running game and not on the files, the MCP
+refuses instead of opening a different state: a group file that places a model by its path (the game places the model to
+learn its origin), a project with loot turned on, or extensions on object groups, objects or carried-over entries
+(dzStudio hands those to its model only once it has indexed the opened project, at a moment that depends on the game). A
+person then opens it in dzStudio, and the agent joins that session. Agents never create a new project.
 
 ## Development
 
@@ -151,7 +168,7 @@ to `world_data_read.js`; `DZSTUDIO_MCP_WORLD_DATA_WORLD` picks the world (defaul
 
 | Directory | Content |
 | --- | --- |
-| `src/scene` | The project state outside the game: text form, numbers, chunks, ids, applying operations, building new ones, opening a project from its files |
+| `src/scene` | The project state outside the game: text form, numbers, chunks, ids, applying operations, building new ones, the layers' models and edits, opening a project from its files |
 | `src/protocol` | The dzcollab 1 client: requests, the session with its poll and send channel |
 | `src/config` | Servers, agent name, tokens and the world data source, configured once |
 | `src/world` | Class and map data: file formats, loading and cache, and the geometry behind the world tools |

@@ -103,6 +103,9 @@ describe('tools', () => {
         'class_info',
         'create_objects',
         'delete_objects',
+        'edit_effects',
+        'edit_spawns',
+        'edit_territories',
         'ground_at',
         'join_session',
         'leave_session',
@@ -113,7 +116,9 @@ describe('tools', () => {
         'modify_objects',
         'object_ground',
         'open_project',
+        'query_layers',
         'query_objects',
+        'read_extensions',
         'read_scene',
         'release',
         'request_review',
@@ -445,5 +450,158 @@ describe('tools', () => {
     expect((await h.call('leave_session')).text).toBe('Left s1');
     expect(h.fake.count('session/leave')).toBe(1);
     expect((await h.call('list_sessions')).text).toMatch(/^Not in any session/);
+  });
+
+  describe('layers', () => {
+    /** A state with entries of every layer, as an opened project holds them. */
+    function layerState(): string {
+      const scene = new Scene(new IdAllocator('k3f9a0x2mq'));
+      scene.open(golden.Z1!);
+      const b = new OpBuilder(scene, 'spawns:edit', { author: 'a1a1a1a1a1a1a1a1', authorName: 'Anna' });
+      const add = (kind: string, f: Record<string, string>): string => b.createElement(kind, 'project', new Map(Object.entries(f)));
+      add('spawns:event', { name: 'VehicleDzsOffroadHatchback', class: 'OffroadHatchback', nominal: '1' });
+      add('spawns:point', { event: 'VehicleDzsOffroadHatchback', origin: 'own', x: '100.000000', z: '200.000000', a: '45.000000' });
+      add('spawns:point', { event: 'VehicleCivilianSedan', origin: 'base', bx: '10', bz: '20', ba: '90', x: '11', z: '21', a: '90' });
+      add('spawns:set', { event: 'VehicleCivilianSedan', field: 'nominal', from: '8', to: '12' });
+      add('effects:area', { name: 'DzsGas1', preset: 'gas', x: '300', z: '400', r: '75' });
+      add('effects:change', { area: 'Ship-SW', br: '100', r: '150', x: '', bx: '', z: '', bz: '' });
+      add('territories:zone', {
+        name: 'InfectedCity',
+        file: 'env/zombie_territories.xml',
+        color: '4278190335',
+        x: '500',
+        z: '600',
+        r: '50',
+        dmin: '1',
+        dmax: '3',
+      });
+      add('territories:nominal', { event: 'AnimalWolf', from: '4', to: '6' });
+      const op = b.finish();
+      expect(scene.apply(op)).toEqual({ result: 'applied' });
+      return scene.stateText();
+    }
+    const E = (n: number): string => `k3f9a0x2mq-${n}`;
+    const EVENT = E(3);
+    const OWN_POINT = E(4);
+    const BASE_POINT = E(5);
+    const AREA = E(7);
+    const AREA_CHANGE = E(8);
+    const ZONE = E(9);
+
+    async function inLayers() {
+      const h = await harness();
+      const host = h.fake.createSession({ state: layerState() });
+      expect((await h.call('join_session', { session_id: host.sessionId })).isError).toBe(false);
+      const ops = () => h.fake.sessions.get(host.sessionId)!.log.map((e) => readOperation(e.parts.flat().join('')));
+      return { h, host, ops };
+    }
+
+    it('reads the layers', async () => {
+      const { h } = await inLayers();
+      const scene = await h.call('read_scene');
+      expect(scene.data.layers.spawns).toEqual({ events: 1, points: 2, eventValues: 1 });
+      const q = await h.call('query_layers', { layer: 'spawns', near: { x: 100, z: 200, radius: 1 } });
+      expect(q.data.entries).toEqual([
+        {
+          id: OWN_POINT,
+          layer: 'spawns',
+          kind: 'point',
+          name: 'VehicleDzsOffroadHatchback',
+          origin: 'own',
+          position: [100, 200],
+          angle: 45,
+        },
+      ]);
+      expect((await h.call('query_layers', { name: 'AnimalWolf' })).data.entries[0]).toMatchObject({ kind: 'count', from: 4, to: 6 });
+      expect((await h.call('read_extensions')).text).toMatch(/^The project carries no extensions/);
+    });
+
+    it('adds spawn points with the numbers dzStudio writes, each as its own step, locking them first', async () => {
+      const { h, ops } = await inLayers();
+      const r = await h.call('edit_spawns', {
+        action: 'add_points',
+        event: 'VehicleCivilianSedan',
+        points: [
+          { x: 1234.5678, z: 50, angle: -90 },
+          { x: 7, z: 8 },
+        ],
+      });
+      expect(r.isError).toBe(false);
+      expect(r.text).toMatch(/^2 steps sent: 2 spawn points added to VehicleCivilianSedan/);
+      const [first, second] = ops();
+      expect([first!.type, second!.type]).toEqual(['spawns:edit', 'spawns:edit']);
+      expect(
+        [...first!.changes, ...second!.changes].map((c) => c.k === 'create' && [c.el.kind, c.el.after, Object.fromEntries(c.el.fields)]),
+      ).toEqual([
+        ['spawns:point', E(10), { event: 'VehicleCivilianSedan', origin: 'own', x: '1234.570000', z: '50.000000', a: '270.000000' }],
+        ['spawns:point', r.data.points[0], { event: 'VehicleCivilianSedan', origin: 'own', x: '7.000000', z: '8.000000', a: '0.000000' }],
+      ]);
+      const order = h.fake.requests.map((x) => x.endpoint).filter((e) => e === 'locks/set' || e === 'ops/send');
+      expect(order).toEqual(['locks/set', 'ops/send', 'locks/set', 'ops/send']);
+      expect(h.fake.requests.find((x) => x.endpoint === 'locks/set')!.body.elements).toEqual([r.data.points[0]]);
+    });
+
+    it('places a fixed vehicle as an own event with a free name', async () => {
+      const { h, ops } = await inLayers();
+      const r = await h.call('edit_spawns', { action: 'add_fixed_vehicle', class: 'OffroadHatchback', x: 5, z: 6, angle: 10 });
+      expect(r.data.eventName).toBe('VehicleDzsOffroadHatchback_2');
+      expect(ops()[0]!.changes.map((c) => c.k === 'create' && Object.fromEntries(c.el.fields))).toEqual([
+        { name: 'VehicleDzsOffroadHatchback_2', class: 'OffroadHatchback', nominal: '1' },
+        { event: 'VehicleDzsOffroadHatchback_2', origin: 'own', x: '5.000000', z: '6.000000', a: '10.000000' },
+      ]);
+    });
+
+    it('moves and removes spawn points as dzStudio does', async () => {
+      const { h, ops } = await inLayers();
+      expect((await h.call('edit_spawns', { action: 'move_point', id: BASE_POINT, x: 12.25 })).isError).toBe(false);
+      expect(ops()[0]!.changes).toEqual([
+        { k: 'field', id: BASE_POINT, key: 'x', old: '11', new: '12.250000' },
+        { k: 'field', id: BASE_POINT, key: 'z', old: '21', new: '21.000000' },
+        { k: 'field', id: BASE_POINT, key: 'a', old: '90', new: '90.000000' },
+      ]);
+      expect((await h.call('edit_spawns', { action: 'remove_point', id: BASE_POINT })).text).toMatch(/base spawn point .* marked removed/);
+      expect(ops()[1]!.changes).toEqual([{ k: 'field', id: BASE_POINT, key: 'gone', new: '1' }]);
+      const last = await h.call('edit_spawns', { action: 'remove_point', id: OWN_POINT });
+      expect(last.text).toMatch(/deleted with its own event/);
+      expect(ops()[2]!.changes.map((c) => c.k === 'delete' && c.el.id)).toEqual([OWN_POINT, EVENT]);
+    });
+
+    it('changes counts only where the state knows the base value', async () => {
+      const { h, ops } = await inLayers();
+      expect((await h.call('edit_spawns', { action: 'set_nominal', event: 'VehicleCivilianSedan', value: 15 })).isError).toBe(false);
+      expect(ops()[0]!.changes).toEqual([{ k: 'field', id: E(6), key: 'to', old: '12', new: '15' }]);
+      await h.call('edit_spawns', { action: 'set_nominal', event: 'VehicleCivilianSedan', value: 8 });
+      expect(ops()[1]!.changes.map((c) => c.k)).toEqual(['delete']);
+      const unknown = await h.call('edit_spawns', { action: 'set_nominal', event: 'VehicleTruck', value: 2 });
+      expect(unknown).toMatchObject({ isError: true });
+      expect(unknown.text).toContain("needs the base's value");
+      await h.call('edit_territories', { action: 'set_count', event: 'AnimalWolf', value: 9 });
+      expect(ops()[2]!.changes).toEqual([{ k: 'field', id: E(10), key: 'to', old: '6', new: '9' }]);
+    });
+
+    it('adds, changes and removes effect areas', async () => {
+      const { h, ops } = await inLayers();
+      const r = await h.call('edit_effects', { action: 'add_area', preset: 'gas', x: 1000.5, z: 2000 });
+      expect(r.data.name).toBe('DzsGas2');
+      expect(ops()[0]!.changes.map((c) => c.k === 'create' && Object.fromEntries(c.el.fields))).toEqual([
+        { name: 'DzsGas2', preset: 'gas', x: '1000.5', z: '2000', r: '75' },
+      ]);
+      await h.call('edit_effects', { action: 'change_area', id: AREA, radius: 80.123456789 });
+      expect(ops()[1]!.changes).toEqual([{ k: 'field', id: AREA, key: 'r', old: '75', new: '80.1235' }]);
+      expect((await h.call('edit_effects', { action: 'change_area', id: AREA_CHANGE, x: 1 })).text).toContain("base's values");
+      await h.call('edit_effects', { action: 'remove_area', id: AREA_CHANGE });
+      expect(ops()[2]!.changes).toEqual([{ k: 'field', id: AREA_CHANGE, key: 'gone', new: '1' }]);
+    });
+
+    it('changes and removes own zones', async () => {
+      const { h, ops } = await inLayers();
+      await h.call('edit_territories', { action: 'change_zone', id: ZONE, radius: 60, dmax: 5 });
+      expect(ops()[0]!.changes).toEqual([
+        { k: 'field', id: ZONE, key: 'r', old: '50', new: '60' },
+        { k: 'field', id: ZONE, key: 'dmax', old: '3', new: '5' },
+      ]);
+      await h.call('edit_territories', { action: 'remove_zone', id: ZONE });
+      expect(ops()[1]!.changes.map((c) => c.k)).toEqual(['delete']);
+    });
   });
 });

@@ -167,7 +167,8 @@ export function createServer(agent: Agent, world?: WorldTools): McpServer {
     'read_scene',
     {
       description:
-        'Overview of the project: map, groups with name, object count, hidden, locked and the X/Z bounds of their objects; loot on or off.',
+        'Overview of the project: map, groups with name, object count, hidden, locked and the X/Z bounds of their objects; loot on or off; ' +
+        'how many entries each layer (Spawns, Effects, Territories) holds and how many are carried over unchanged; the project extensions.',
       inputSchema: { session },
     },
     run((a: { session?: string }) => agent.readScene(a.session)),
@@ -299,6 +300,120 @@ export function createServer(agent: Agent, world?: WorldTools): McpServer {
       inputSchema: { session, ids: z.array(z.string()) },
     },
     run((a: { session?: string; ids: string[] }) => agent.deleteObjects(a.session, a.ids)),
+  );
+
+  const near = z.object({ x: z.number(), z: z.number(), radius: z.number().positive() }).optional();
+  const rect = z.object({ minX: z.number(), minZ: z.number(), maxX: z.number(), maxZ: z.number() }).optional();
+  const clean = <T extends object>(a: T): T => Object.fromEntries(Object.entries(a).filter(([, v]) => v !== undefined)) as T;
+
+  mcp.registerTool(
+    'query_layers',
+    {
+      description:
+        'Entries of the layers Spawns (own vehicle events, spawn points, moved or removed base points, changed event counts), ' +
+        'Effects (own effect areas, changes to base areas) and Territories (own territories and zones, changes to base zones, changed counts), ' +
+        'by layer, ids, event/area/zone name, a circle (X, Z, radius in m) or a rectangle (X, Z), with position [x, z], radius and values. ' +
+        'Entries the project carries over unchanged (made outside dzStudio, e.g. by dzbot) come last with kept: true and are read-only. Pages of 500.',
+      inputSchema: {
+        session,
+        layer: z.enum(['spawns', 'effects', 'territories']).optional(),
+        ids: z.array(z.string()).optional(),
+        name: z.string().optional().describe('Event, area or zone name'),
+        near,
+        rect,
+        kept: z.boolean().optional().describe('Include the entries carried over unchanged (default true)'),
+        page: z.number().int().min(0).optional(),
+      },
+    },
+    run((a: { session?: string } & Parameters<Agent['queryLayers']>[1]) => {
+      const { session: handle, ...q } = a;
+      return agent.queryLayers(handle, clean(q));
+    }),
+  );
+
+  mcp.registerTool(
+    'read_extensions',
+    {
+      description:
+        "The project's extensions (data of other applications kept in the project, e.g. the dzbot rules of a project mod) with their data, read-only.",
+      inputSchema: { session },
+    },
+    run((a: { session?: string }) => agent.readExtensions(a.session)),
+  );
+
+  mcp.registerTool(
+    'edit_spawns',
+    {
+      description:
+        'One step in the Spawns layer, as dzStudio makes it. add_points: own spawn points of an event, one step per point (event, points [{x, z, angle}]); ' +
+        'add_fixed_vehicle: an own event for exactly this vehicle here (class, x, z, angle); move_point: an own point or a base point the project moved (id, x, z, angle); ' +
+        'remove_point: delete an own point (its own event goes with its last point) or mark a moved base point removed (id); ' +
+        'set_nominal: the count of an own event, or of a base event whose count the project changes already (event, value). Base points and counts the project does not touch yet are in the mission files only dzStudio reads.',
+      inputSchema: {
+        session,
+        action: z.enum(['add_points', 'add_fixed_vehicle', 'move_point', 'remove_point', 'set_nominal']),
+        event: z.string().optional(),
+        class: z.string().optional(),
+        points: z.array(z.object({ x: z.number(), z: z.number(), angle: z.number().optional().describe('Heading in degrees') })).optional(),
+        id: z.string().optional(),
+        x: z.number().optional(),
+        z: z.number().optional(),
+        angle: z.number().optional(),
+        value: z.number().int().min(0).optional(),
+      },
+    },
+    run((a: { session?: string } & Parameters<Agent['editSpawns']>[1]) => {
+      const { session: handle, ...e } = a;
+      return agent.editSpawns(handle, clean(e));
+    }),
+  );
+
+  mcp.registerTool(
+    'edit_effects',
+    {
+      description:
+        'One step in the Effects layer, as dzStudio makes it. add_area: an own area of a preset (preset, x, z, radius; named Dzs<Preset><n>); ' +
+        'change_area: move or resize an own area (id, x, z, radius); remove_area: delete an own area or mark a changed base area removed (id).',
+      inputSchema: {
+        session,
+        action: z.enum(['add_area', 'change_area', 'remove_area']),
+        preset: z.enum(['gas', 'geyser', 'spring', 'volcanic', 'hearts', 'smoke']).optional(),
+        id: z.string().optional(),
+        x: z.number().optional(),
+        z: z.number().optional(),
+        radius: z.number().positive().optional(),
+      },
+    },
+    run((a: { session?: string } & Parameters<Agent['editEffects']>[1]) => {
+      const { session: handle, ...e } = a;
+      return agent.editEffects(handle, clean(e));
+    }),
+  );
+
+  mcp.registerTool(
+    'edit_territories',
+    {
+      description:
+        'One step in the Territories layer, as dzStudio makes it. change_zone: move, resize or change dmin/dmax of an own zone (id, x, z, radius, dmin, dmax); ' +
+        "remove_zone: delete an own zone or mark a changed base zone removed (id); set_count: a kind's count the project changes already (event, value). " +
+        'New zones need the kinds of the base (cfgenvironment.xml and its territory files), which only dzStudio reads.',
+      inputSchema: {
+        session,
+        action: z.enum(['change_zone', 'remove_zone', 'set_count']),
+        id: z.string().optional(),
+        event: z.string().optional(),
+        x: z.number().optional(),
+        z: z.number().optional(),
+        radius: z.number().positive().optional(),
+        dmin: z.number().int().min(0).optional(),
+        dmax: z.number().int().min(0).optional(),
+        value: z.number().int().min(0).optional(),
+      },
+    },
+    run((a: { session?: string } & Parameters<Agent['editTerritories']>[1]) => {
+      const { session: handle, ...e } = a;
+      return agent.editTerritories(handle, clean(e));
+    }),
   );
 
   mcp.registerTool(

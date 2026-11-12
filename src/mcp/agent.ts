@@ -17,6 +17,23 @@ import { CollabError, HttpTransport, UnreachableError, type Json, type Transport
 import { BuildError, normalizeAngle, OpBuilder, type Vec3 } from '../scene/edits.js';
 import { readFloat32, readVec3, writeFloat32, writeVec3 } from '../scene/float32.js';
 import { PROJECT_ID } from '../scene/ids.js';
+import {
+  addEffectArea,
+  addFixedVehicle,
+  addSpawnPoints,
+  changeEffectArea,
+  changeZone,
+  moveSpawnPoint,
+  PRESET_RADIUS,
+  removeEffectArea,
+  removeSpawnPoint,
+  removeZone,
+  setKindCount,
+  setSpawnNominal,
+  type SpawnPointSpec,
+} from '../scene/layeredits.js';
+import { EFFECTS, SPAWNS, TERRITORIES } from '../scene/layers.js';
+import { layerRows, layerSummary, projectExtensions, type LayerQuery } from '../scene/layerview.js';
 import { loadProject, LoadRefused, neededForLoad, type LoadResult } from '../scene/projectload.js';
 import type { Scene } from '../scene/scene.js';
 import type { Element, Operation } from '../scene/textform.js';
@@ -108,6 +125,58 @@ export interface ObjectQuery {
   page?: number;
 }
 
+export interface SpawnsEdit {
+  action: 'add_points' | 'add_fixed_vehicle' | 'move_point' | 'remove_point' | 'set_nominal';
+  event?: string;
+  class?: string;
+  points?: SpawnPointSpec[];
+  id?: string;
+  x?: number;
+  z?: number;
+  angle?: number;
+  value?: number;
+}
+
+export interface EffectsEdit {
+  action: 'add_area' | 'change_area' | 'remove_area';
+  preset?: string;
+  id?: string;
+  x?: number;
+  z?: number;
+  radius?: number;
+}
+
+export interface TerritoriesEdit {
+  action: 'change_zone' | 'remove_zone' | 'set_count';
+  id?: string;
+  event?: string;
+  x?: number;
+  z?: number;
+  radius?: number;
+  dmin?: number;
+  dmax?: number;
+  value?: number;
+}
+
+/** What one layer edit touched: existing elements it changes or deletes, new ones, and a line for the result. */
+interface LayerStep {
+  existing: string[];
+  created: string[];
+  deleted: string[];
+  text: string;
+  data?: Json;
+}
+
+function count(n: number | undefined, what: string): string {
+  if (n === undefined || !Number.isInteger(n) || n < 0) throw new ToolError(`${what} must be a whole number of at least 0`);
+  return String(n);
+}
+
+function required<T>(v: T | undefined, what: string): T {
+  if (v === undefined || v === '') throw new ToolError(`Give ${what}`);
+  return v;
+}
+
 export interface ProjectObject {
   id: string;
   class: string;
@@ -127,6 +196,7 @@ export interface SessionWorld {
 const PHASE_TEXT: Record<Phase, string> = { waiting: 'waiting for work', working: 'working', review: 'waiting for review' };
 
 function plural(n: number, word: string): string {
+  if (n !== 1 && word.endsWith('y')) return `${n} ${word.slice(0, -1)}ies`;
   return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
 
@@ -583,8 +653,10 @@ export class Agent {
     let loaded: LoadResult | undefined;
     const build = (scene: Scene): void => {
       loaded = loadProject({ files, ids: scene.ids, ...by, ...(lookup ? { classKnown: (n: string) => lookup.knows(n) } : {}) });
-      const res = scene.apply(loaded.op);
-      if (res.result !== 'applied') throw new LoadRefused(`The project's state does not open (${res.result})`);
+      for (const op of [loaded.op, ...loaded.followUps]) {
+        const res = scene.apply(op);
+        if (res.result !== 'applied') throw new LoadRefused(`The project's state does not open (${res.result})`);
+      }
     };
     const cred = this.credential(server);
     try {
@@ -605,7 +677,8 @@ export class Agent {
     const notes = loaded!.notes;
     return {
       text:
-        `Opened ${rec.projectName} from its files (${plural(loaded!.groups, 'group')}, ${plural(loaded!.objects, 'object')}) ` +
+        `Opened ${rec.projectName} from its files (${plural(loaded!.groups, 'group')}, ${plural(loaded!.objects, 'object')}` +
+        `${loaded!.layerElements ? `, ${plural(loaded!.layerElements, 'layer entry')}` : ''}) ` +
         `and started a session as ${rec.handle}; it is the current session` +
         (notes.length ? `. On opening: ${notes.join('; ')}` : ''),
       data: this.sessionRow(rec),
@@ -878,9 +951,25 @@ export class Agent {
           return row;
         });
       const objects = groups.reduce((n, g) => n + (g.objects as number), 0);
+      const layers = layerSummary(scene);
+      const extensions = projectExtensions(scene).map((e) => (e.required ? { url: e.url, required: true } : { url: e.url }));
+      const inLayers =
+        layers.spawns.events + layers.spawns.points + layers.spawns.eventValues + layers.effects.areas + layers.effects.areaChanges;
+      const inTerritories = Object.values(layers.territories).reduce((a, b) => a + b, 0);
+      const keptCount = layers.kept.blocks + layers.kept.changes;
       return {
-        text: `${r.projectName || 'Project'} on ${r.map || 'unknown map'}: ${plural(groups.length, 'group')}, ${plural(objects, 'object')}`,
-        data: { project: r.projectName, map: r.map, loot: project?.fields.get('lootEnabled') === 'true', groups, objects },
+        text:
+          `${r.projectName || 'Project'} on ${r.map || 'unknown map'}: ${plural(groups.length, 'group')}, ${plural(objects, 'object')}` +
+          `, ${plural(inLayers + inTerritories, 'layer entry')}${keptCount ? `, ${plural(keptCount, 'entry')} carried over unchanged` : ''}`,
+        data: {
+          project: r.projectName,
+          map: r.map,
+          loot: project?.fields.get('lootEnabled') === 'true',
+          groups,
+          objects,
+          layers,
+          extensions,
+        },
       };
     });
   }
@@ -1190,6 +1279,215 @@ export class Agent {
     const before = c.selection.size;
     await c.setLocks(keep);
     return { text: `Released ${plural(before - c.selection.size, 'object')}; ${c.selection.size} still held` };
+  }
+
+  // ------------------------------------------------------------ the layers
+
+  async queryLayers(handle: string | undefined, q: LayerQuery & { page?: number }): Promise<ToolResult> {
+    const { c } = await this.live(handle, false);
+    const holders = this.holderNames(c);
+    return c.view((scene) => {
+      const rows = layerRows(scene, q).map((row) => {
+        if (c.selection.has(row.id)) return { ...row, heldBy: 'you' };
+        const h = holders.get(row.id);
+        return h ? { ...row, heldBy: h } : row;
+      });
+      const page = Math.max(0, Math.floor(q.page ?? 0));
+      const data: Json = { total: rows.length, page, entries: rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE) };
+      if ((page + 1) * PAGE_SIZE < rows.length) data.nextPage = page + 1;
+      const kept = rows.filter((row) => row.kept).length;
+      return {
+        text:
+          `${plural(rows.length, 'layer entry')}${kept ? ` (${kept} carried over unchanged, read-only)` : ''}` +
+          `${data.nextPage !== undefined ? `, page ${page + 1} of ${Math.ceil(rows.length / PAGE_SIZE)}` : ''}`,
+        data,
+      };
+    });
+  }
+
+  async readExtensions(handle: string | undefined): Promise<ToolResult> {
+    const { c } = await this.live(handle, false);
+    return c.view((scene) => {
+      const list = projectExtensions(scene);
+      return {
+        text: list.length ? `${plural(list.length, 'project extension')} (read-only)` : 'The project carries no extensions',
+        data: { extensions: list },
+      };
+    });
+  }
+
+  /** One edit of a layer as one step: built on the state, its elements locked, sent. */
+  private async layerStep(handle: string | undefined, type: string, fn: (b: OpBuilder) => LayerStep): Promise<ToolResult> {
+    const { r, c } = await this.live(handle);
+    this.checkConnection(c);
+    const b = new OpBuilder(c.scene, type, this.author(r));
+    let step: LayerStep | undefined;
+    const op = this.build(c, b, () => {
+      step = fn(b);
+    });
+    if (!op.changes.length) return { text: 'Nothing changed: every value is already as asked' };
+    await this.lockFor(c, step!.existing, step!.created);
+    const res = await c.submit(op);
+    c.lastTouched = [...step!.existing, ...step!.created].filter((id) => !step!.deleted.includes(id));
+    const text = this.stepText(res, op.id);
+    if (res.status === 'applied' && step!.deleted.length) await c.setLocks([...c.selection].filter((id) => !step!.deleted.includes(id)));
+    return { text: `${text}: ${step!.text}`, data: { step: op.id, ...step!.data } };
+  }
+
+  async editSpawns(handle: string | undefined, e: SpawnsEdit): Promise<ToolResult> {
+    if (e.action === 'add_points') {
+      const event = required(e.event, 'the event');
+      const points = e.points?.length ? e.points : e.x !== undefined && e.z !== undefined ? [{ x: e.x, z: e.z, angle: e.angle }] : [];
+      if (!points.length) throw new ToolError('Give the points (x, z, angle)');
+      // dzStudio adds every point as a step of its own
+      const steps: string[] = [];
+      const created: string[] = [];
+      for (const p of points) {
+        const res = await this.layerStep(handle, SPAWNS.op, (b) => {
+          const ids = addSpawnPoints(b, event, [p.angle === undefined ? { x: p.x, z: p.z } : p]);
+          return { existing: [], created: ids, deleted: [], text: '', data: { point: ids[0]! } };
+        });
+        const data = res.data as Json;
+        steps.push(data.step);
+        created.push(data.point);
+      }
+      return {
+        text: `${plural(steps.length, 'step')} sent: ${plural(created.length, 'spawn point')} added to ${event}`,
+        data: { steps, points: created },
+      };
+    }
+    return this.layerStep(handle, SPAWNS.op, (b) => {
+      switch (e.action) {
+        case 'add_fixed_vehicle': {
+          const cls = required(e.class, 'the vehicle class');
+          const made = addFixedVehicle(b, cls, {
+            x: required(e.x, 'x'),
+            z: required(e.z, 'z'),
+            ...(e.angle !== undefined ? { angle: e.angle } : {}),
+          });
+          return {
+            existing: [],
+            created: [made.event, made.point],
+            deleted: [],
+            text: `fixed vehicle ${cls} as own event ${made.name}`,
+            data: { event: made.event, eventName: made.name, point: made.point },
+          };
+        }
+        case 'move_point': {
+          const id = required(e.id, 'the spawn point (id)');
+          const p: { x?: number; z?: number; angle?: number } = {};
+          if (e.x !== undefined) p.x = e.x;
+          if (e.z !== undefined) p.z = e.z;
+          if (e.angle !== undefined) p.angle = e.angle;
+          moveSpawnPoint(b, id, p);
+          return { existing: [id], created: [], deleted: [], text: `spawn point ${id} moved` };
+        }
+        case 'remove_point': {
+          const id = required(e.id, 'the spawn point (id)');
+          const own = b.scene.get(id)?.fields.get('origin') !== 'base';
+          const res = removeSpawnPoint(b, id);
+          const deleted = own ? [id, ...(res.deletedEvent ? [res.deletedEvent] : [])] : [];
+          return {
+            existing: [id, ...(res.deletedEvent ? [res.deletedEvent] : [])],
+            created: [],
+            deleted,
+            text: own
+              ? `spawn point ${id} deleted${res.deletedEvent ? ' with its own event' : ''}`
+              : `base spawn point ${id} marked removed`,
+          };
+        }
+        case 'set_nominal': {
+          const event = required(e.event, 'the event');
+          setSpawnNominal(b, event, count(e.value, 'value'));
+          const touched = b.changes.map((ch) => ('el' in ch ? ch.el.id : ch.id));
+          return {
+            existing: touched,
+            created: [],
+            deleted: b.changes.some((ch) => ch.k === 'delete') ? touched : [],
+            text: `count of ${event} set`,
+          };
+        }
+      }
+      throw new ToolError(`Unknown action ${e.action}`);
+    });
+  }
+
+  editEffects(handle: string | undefined, e: EffectsEdit): Promise<ToolResult> {
+    return this.layerStep(handle, EFFECTS.op, (b) => {
+      switch (e.action) {
+        case 'add_area': {
+          const preset = required(e.preset, 'the preset');
+          const made = addEffectArea(b, preset, required(e.x, 'x'), required(e.z, 'z'), e.radius ?? PRESET_RADIUS[preset] ?? 2);
+          return {
+            existing: [],
+            created: [made.id],
+            deleted: [],
+            text: `effect area ${made.name} added`,
+            data: { area: made.id, name: made.name },
+          };
+        }
+        case 'change_area': {
+          const id = required(e.id, 'the area (id)');
+          const p: { x?: number; z?: number; radius?: number } = {};
+          if (e.x !== undefined) p.x = e.x;
+          if (e.z !== undefined) p.z = e.z;
+          if (e.radius !== undefined) p.radius = e.radius;
+          changeEffectArea(b, id, p);
+          return { existing: [id], created: [], deleted: [], text: `effect area ${id} changed` };
+        }
+        case 'remove_area': {
+          const id = required(e.id, 'the area (id)');
+          const own = b.scene.get(id)?.kind === EFFECTS.area;
+          removeEffectArea(b, id);
+          return {
+            existing: [id],
+            created: [],
+            deleted: own ? [id] : [],
+            text: own ? `effect area ${id} deleted` : `base area of ${id} marked removed`,
+          };
+        }
+      }
+    });
+  }
+
+  editTerritories(handle: string | undefined, e: TerritoriesEdit): Promise<ToolResult> {
+    return this.layerStep(handle, TERRITORIES.op, (b) => {
+      switch (e.action) {
+        case 'change_zone': {
+          const id = required(e.id, 'the zone (id)');
+          const p: { x?: number; z?: number; radius?: number; dmin?: string; dmax?: string } = {};
+          if (e.x !== undefined) p.x = e.x;
+          if (e.z !== undefined) p.z = e.z;
+          if (e.radius !== undefined) p.radius = e.radius;
+          if (e.dmin !== undefined) p.dmin = count(e.dmin, 'dmin');
+          if (e.dmax !== undefined) p.dmax = count(e.dmax, 'dmax');
+          changeZone(b, id, p);
+          return { existing: [id], created: [], deleted: [], text: `zone ${id} changed` };
+        }
+        case 'remove_zone': {
+          const id = required(e.id, 'the zone (id)');
+          const own = b.scene.get(id)?.kind === TERRITORIES.zone;
+          removeZone(b, id);
+          return {
+            existing: [id],
+            created: [],
+            deleted: own ? [id] : [],
+            text: own ? `zone ${id} deleted` : `base zone of ${id} marked removed`,
+          };
+        }
+        case 'set_count': {
+          const event = required(e.event, 'the event');
+          setKindCount(b, event, count(e.value, 'value'));
+          const touched = b.changes.map((ch) => ('el' in ch ? ch.el.id : ch.id));
+          return {
+            existing: touched,
+            created: [],
+            deleted: b.changes.some((ch) => ch.k === 'delete') ? touched : [],
+            text: `count of ${event} set`,
+          };
+        }
+      }
+    });
   }
 
   async setStatus(handle: string | undefined, phase: 'waiting' | 'working', status?: string): Promise<ToolResult> {
