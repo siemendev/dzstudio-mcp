@@ -228,6 +228,32 @@ describe('session', () => {
     await until(() => server.count('session/leave') === 1);
   });
 
+  it("stays in the session and applies others' layer operations", async () => {
+    const { server, host, s } = await setup();
+    const edits: [string, string][] = [
+      ['spawns:edit', 'spawns:point'],
+      ['effects:edit', 'effects:area'],
+      ['territories:edit', 'territories:zone'],
+    ];
+    let seq = 0;
+    for (const [type, kind] of edits) {
+      const b = new OpBuilder(s.scene, type, { author: 'a1a1a1a1a1a1a1a1', authorName: 'Anna' });
+      const id = b.createElement(kind, 'project', new Map([['x', '1']]));
+      const op = { ...b.finish(), id: `q8w7e6r5t4-${++seq * 10}` };
+      const el = op.changes[0]!;
+      if (el.k === 'create') el.el.id = id.replace(s.prefix, 'q8w7e6r5t4');
+      server.appendAs(host.sessionId, host.participantId, op.id, writeOperation(op));
+      await until(() => s.appliedSeq === seq);
+    }
+    expect(s.state).not.toBe('lost');
+    expect(s.scene.children('project').map((id) => s.scene.get(id)!.kind)).toEqual([
+      'core:group',
+      'spawns:point',
+      'effects:area',
+      'territories:zone',
+    ]);
+  });
+
   it('returns with resume after a long interruption', async () => {
     const { server, host, s } = await setup();
     for (let i = 0; i < 25; i++) server.fail('poll', 'before');

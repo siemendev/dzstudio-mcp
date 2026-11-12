@@ -15,6 +15,15 @@ export const ELEMENT_TYPES: ReadonlyMap<string, ElementType> = new Map([
   ['core:group', { version: 1, parents: ['core:project'] }],
   ['core:object', { version: 1, parents: ['core:group'] }],
   ['loot:entry', { version: 1, parents: ['core:project'] }],
+  ['spawns:event', { version: 1, parents: ['core:project'] }],
+  ['spawns:point', { version: 1, parents: ['core:project'] }],
+  ['spawns:set', { version: 1, parents: ['core:project'] }],
+  ['territories:zone', { version: 1, parents: ['core:project'] }],
+  ['territories:territory', { version: 1, parents: ['core:project'] }],
+  ['territories:change', { version: 1, parents: ['core:project'] }],
+  ['territories:nominal', { version: 1, parents: ['core:project'] }],
+  ['effects:area', { version: 1, parents: ['core:project'] }],
+  ['effects:change', { version: 1, parents: ['core:project'] }],
 ]);
 
 export const OPERATION_TYPES: ReadonlyMap<string, number> = new Map([
@@ -28,6 +37,9 @@ export const OPERATION_TYPES: ReadonlyMap<string, number> = new Map([
   ['brush:edit', 1],
   ['spawner:edit', 1],
   ['loot:edit', 1],
+  ['spawns:edit', 1],
+  ['territories:edit', 1],
+  ['effects:edit', 1],
 ]);
 
 export const COMPANION_TYPES: ReadonlyMap<string, number> = new Map([

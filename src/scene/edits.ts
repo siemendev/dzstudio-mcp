@@ -124,6 +124,27 @@ export class OpBuilder {
     return id;
   }
 
+  /** Creates an element at the end of `parent`; with `fixedId` it gets that id, or none ("") when the id is taken. */
+  createElement(kind: string, parent: string, fields: ReadonlyMap<string, string>, fixedId = ''): string {
+    if (fixedId !== '' && this.scene.has(fixedId)) return '';
+    this.need(parent);
+    const id = fixedId || this.scene.ids.next();
+    this.push({
+      k: 'create',
+      el: {
+        id,
+        kind,
+        parent,
+        after: this.scene.lastChild(parent),
+        hidden: false,
+        locked: false,
+        fields: new Map(fields),
+        comp: new Map(),
+      },
+    });
+    return id;
+  }
+
   /** Sets a field; `undefined` removes it. A value equal to the current one adds no change. */
   setField(id: string, key: string, value: string | undefined): void {
     const el = this.need(id);
