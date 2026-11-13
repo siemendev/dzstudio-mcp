@@ -240,7 +240,7 @@ describe('opening a hosted project from its files', () => {
 
   it('refuses what only the game can open', () => {
     expect(refused({ 'a.json': spawner([{ name: 'DZ\\plants\\tree\\t_x.p3d', pos: [0, 0, 0], ypr: [0, 0, 0] }]) })).toContain('model');
-    expect(refused({ manifest: manifest([]).replace('"enabled": false', '"enabled": true') })).toContain('Loot');
+    expect(refused({ manifest: manifest([]).replace('"enabled": false', '"enabled": true') })).toContain('loot');
     expect(refused({ 'a.json': spawner([FLAG]) }, false)).toContain('class data');
     expect(refused({ manifest: '{"format":"dzstudio-project","version":3}' })).toContain('newer');
     expect(refused({ 'a.json': '{"Objects":[{"name":"A\\u0000B"}]}' })).toContain('\\u0000');
@@ -263,6 +263,31 @@ describe('opening a hosted project from its files', () => {
     const { state, groups } = load({ manifest: project(editor, '', '', ''), 'objects.json': spawner([FLAG, FLAG]) });
     expect(groups).toBe(1);
     expect(state).toBe(want.replace(/dzstudio\/my-base\//g, 'dzstudio/project/'));
+    // loot is always on in dzStudio: an older "enabled" changes nothing, loot blocks or changes are refused, the
+    // placement mode comes along
+    expect(load({ manifest: project(editor.replace('"enabled": false', '"enabled": true'), '', '', '') }).state).toBe(
+      want.replace(/dzstudio\/my-base\//g, 'dzstudio/project/'),
+    );
+    expect(
+      refused({
+        manifest: project(
+          editor,
+          ', {"id": "r-1", "kind": "lootRow", "parent": null, "data": {"name": "Land_Garage_Row_Small", "pos": [1, 2, 3], "a": 0}}',
+        ),
+      }),
+    ).toContain('loot');
+    expect(
+      refused({
+        manifest: project(
+          editor,
+          '',
+          '{"op": "set", "block": "lootType", "key": {"name": "Land_Garage_Row_Small"}, "field": "lootmax", "to": 3}',
+        ),
+      }),
+    ).toContain('loot');
+    const placing = load({ manifest: project(editor.replace('"enabled": false', '"placeWithLoot": true')) });
+    expect(placing.scene.get('project')!.fields.get('lootPlace')).toBe('true');
+    expect(placing.scene.get('project')!.fields.get('lootEnabled')).toBe('false');
     // the file's slug stays with the project, as dzStudio's opening keeps it
     const slugged = load({ manifest: project(editor) }).state;
     expect(slugged).toContain('kept');

@@ -11,7 +11,7 @@
  * project's extensions — in the order dzStudio's plugins do it.
  *
  * Where the editor's result depends on the running game and not on the files alone — a model path (the game places
- * the model to learn its origin) or loot that is turned on (it reads the loot files and the vanilla baseline) — the
+ * the model to learn its origin) or the project's loot (dzStudio reads the loot files and the vanilla baseline) — the
  * project is refused instead of opened differently.
  */
 
@@ -203,7 +203,9 @@ interface PFGroup {
 interface PFData {
   hasProject: boolean;
   groups: PFGroup[];
+  /** `loot.enabled` of a file from an older version. */
   lootEnabled: boolean;
+  lootPlace: boolean;
   lootHidden: boolean;
   lootLocked: boolean;
   writtenTypes: string[];
@@ -217,6 +219,7 @@ function emptyPF(): PFData {
     hasProject: false,
     groups: [],
     lootEnabled: false,
+    lootPlace: false,
     lootHidden: false,
     lootLocked: false,
     writtenTypes: [],
@@ -282,6 +285,7 @@ function readProjectPart(doc: SrcDoc, proj: SrcNode, notes: string[]): PFData {
   const loot = proj.get('loot');
   if (loot?.type === 'obj') {
     d.lootEnabled = bool(loot.get('enabled')) ?? false;
+    d.lootPlace = bool(loot.get('placeWithLoot')) ?? false;
     d.lootHidden = bool(loot.get('hidden')) ?? false;
     d.lootLocked = bool(loot.get('locked')) ?? false;
     const pid = loot.get('projectId');
@@ -369,9 +373,7 @@ function partV1(root: JV & { t: 'obj' }, paths: Map<string, string>): JV {
   if (given?.t === 'obj') part = { t: 'obj', m: new Map(given.m) };
   else {
     part = jObj();
-    const loot = jObj();
-    loot.m.set('enabled', jBool(hasLoot(root)));
-    part.m.set('loot', loot);
+    part.m.set('loot', jObj());
   }
   let groups = part.m.get('groups');
   if (groups?.t === 'arr') {
@@ -391,7 +393,6 @@ function partV1(root: JV & { t: 'obj' }, paths: Map<string, string>): JV {
   let loot = part.m.get('loot');
   if (loot?.t !== 'obj') {
     loot = jObj();
-    loot.m.set('enabled', jBool(false));
     part.m.set('loot', loot);
   } else {
     loot = { t: 'obj', m: new Map(loot.m) };
@@ -799,10 +800,8 @@ export function loadProject(input: LoadInput): LoadResult {
     if (e instanceof SrcUnsupported) throw new LoadRefused(`The project file holds ${e.message}`);
     throw e;
   }
-  if (pf.lootEnabled)
-    throw new LoadRefused(
-      'Loot is turned on in this project; only dzStudio can open it from its files. Ask a person to open it in dzStudio.',
-    );
+  if (v2 ? hasLoot(v2.root) : pf.lootEnabled)
+    throw new LoadRefused('This project has loot; only dzStudio can open it from its files. Ask a person to open it in dzStudio.');
 
   const order: { entry: PFGroup | undefined; file: string }[] = [];
   const taken = new Set<string>();
@@ -835,7 +834,8 @@ export function loadProject(input: LoadInput): LoadResult {
 
   const changes: Change[] = [];
   const projectFields = new Map([
-    ['lootEnabled', String(pf.lootEnabled)],
+    ['lootEnabled', 'false'],
+    ['lootPlace', String(pf.lootPlace)],
     ['lootHidden', String(pf.lootHidden)],
     ['lootLocked', String(pf.lootLocked)],
     ['writtenTypes', writtenJson(pf.writtenTypes, pf.writtenOrig)],
