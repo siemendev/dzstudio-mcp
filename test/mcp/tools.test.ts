@@ -133,6 +133,26 @@ describe('tools', () => {
     expect(tools).not.toContain('create_project');
   });
 
+  it('describes every array with a single items schema, which every MCP client can read', async () => {
+    const h = await harness();
+    const client = new Client({ name: 't', version: '1' });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await Promise.all([createServer(h.agent).connect(a), client.connect(b)]);
+    const tools = (await client.listTools()).tools;
+    await client.close();
+    const tuples: string[] = [];
+    const scan = (node: unknown, path: string): void => {
+      if (Array.isArray(node)) return node.forEach((n, i) => scan(n, `${path}[${i}]`));
+      if (!node || typeof node !== 'object') return;
+      for (const [k, v] of Object.entries(node)) {
+        if ((k === 'items' && Array.isArray(v)) || k === 'prefixItems' || k === 'additionalItems') tuples.push(`${path}.${k}`);
+        scan(v, `${path}.${k}`);
+      }
+    };
+    for (const t of tools) scan(t.inputSchema, t.name);
+    expect(tuples).toEqual([]);
+  });
+
   it('logs in with a code in two calls and keeps the token out of every result', async () => {
     const h = await harness({ signedIn: false });
     const servers = await h.call('list_servers');

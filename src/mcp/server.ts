@@ -9,7 +9,10 @@ import { Agent, ToolError, type ToolResult } from './agent.js';
 
 const session = z.string().optional().describe('Session handle (s1, s2 …) or session id; default: the current session');
 const server = z.string().optional().describe('Server name; default: the first configured server');
-const vec3 = z.tuple([z.number(), z.number(), z.number()]);
+const vec3 = z
+  .array(z.number())
+  .length(3)
+  .transform((v) => v as [number, number, number]);
 const map = z
   .string()
   .optional()
